@@ -21,7 +21,7 @@ namespace MACE
             //  - 1-6 are average workers making 1-2 mistakes each
             //  - 7th is a total spammer, always puts 0
             //  - 8th is a perfect worker
-            // Each item gets 3 answers (data is missing at random, indicated by "-1")
+            // Each item gets 4 answers (data is missing at random, indicated by "-1")
             // Item true label is shown in comment
             //
 
