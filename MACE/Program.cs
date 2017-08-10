@@ -53,7 +53,7 @@ namespace MACE
             // Parameters and their priors
             //
 
-            var theta = Variable.Array<double>(m).Named("theta");
+            var theta = Variable.Array<double>(m).Named("trust");
             theta[m] = Variable.Random(new Beta(2, 2)).ForEach(m);
 
             double[] initCounts = Enumerable.Repeat<double>(1.0, numCategories).ToArray();
@@ -80,10 +80,6 @@ namespace MACE
                         {
                             A[n][m] = Variable.Discrete(ksi[m]);
                         }
-                    }
-                    using (Variable.If(A[n][m] < 0))
-                    {
-                        A[n][m] = T[n];
                     }
                 }
             }
