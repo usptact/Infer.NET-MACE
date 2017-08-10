@@ -11,32 +11,32 @@ namespace MACE
     {
         static void Main(string[] args)
         {
-            const int numWorkers = 7;
+            const int numWorkers = 8;
             const int numItems = 10;
             const int numCategories = 3;
 
             //
             // Sample data:
             // 7 workers
-            //  - 1-5 are average workers making 1-2 mistakes each
-            //  - 6th is a total spammer, always puts 0
-            //  - 7th is a perfect worker
-            // Each item gets 3 answers (data is missing at random, indicated by "-1")
+            //  - 1-6 are average workers making 1-2 mistakes each
+            //  - 7th is a total spammer, always puts 0
+            //  - 8th is a perfect worker
+            // Each item gets 4 answers (data is missing at random, indicated by "-1")
             // Item true label is shown in comment
             //
 
             int[][] data = new int[numItems][];
 
-            data[0] = new int[] { -1, -1, 1, 0, -1, -1, 0 };   // 0
-            data[1] = new int[] { 2, -1, -1, 1, -1, -1, 0 };   // 0
-            data[2] = new int[] { 1, -1, -1, -1, -1, 0, 1 };   // 1
-            data[3] = new int[] { 1, -1, 1, -1, -1, -1, 1 };   // 1
-            data[4] = new int[] { -1, -1, -1, 1, 1, 0, -1 };   // 1
-            data[5] = new int[] { 2, 1, 2, -1, -1, -1, -1 };   // 1
-            data[6] = new int[] { 0, 2, -1, -1, -1, 0, -1 };   // 0
-            data[7] = new int[] { -1, -1, -1, 0, 0, 0, -1 };   // 1
-            data[8] = new int[] { 1, 1, -1, -1, 0, -1, -1 };   // 1
-            data[9] = new int[] { 0, 2, -1, -1, 2, -1, -1 };   // 2
+            data[0] = new int[] { 0, -1, -1, 1, 0, -1, -1, 0 };   // 0
+            data[1] = new int[] { -1, 2, -1, -1, 1, -1, -1, 0 };   // 0
+            data[2] = new int[] { 1, 1, -1, -1, -1, -1, 0, 1 };   // 1
+            data[3] = new int[] { -1, 1, -1, 1, -1, -1, -1, 1 };   // 1
+            data[4] = new int[] { 1, -1, -1, -1, 1, 1, 0, -1 };   // 1
+            data[5] = new int[] { -1, 2, 1, 2, -1, -1, -1, -1 };   // 1
+            data[6] = new int[] { 0, 0, 2, -1, -1, -1, 0, -1 };   // 0
+            data[7] = new int[] { 1, -1, -1, -1, 0, 0, 0, -1 };   // 1
+            data[8] = new int[] { -1, 1, 1, -1, -1, 0, -1, -1 };   // 1
+            data[9] = new int[] { 2, 0, 2, -1, -1, 2, -1, -1 };   // 2
 
             //
             // model variables
@@ -84,7 +84,11 @@ namespace MACE
                 }
             }
 
+            // hook up the data
             A.ObservedValue = data;
+
+			// prevent engine from trying to infer A
+			A.AddAttribute(new DoNotInfer());
 
             //
             // Class labels -- break symmetry
