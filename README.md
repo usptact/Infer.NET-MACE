@@ -21,4 +21,5 @@ Sample data features votes from 8 workers on 10 work items. A work item label ca
 First block of the output is true label estimate for each work item. The second block informs about reliability/trust information for each worker-item pair. The latter output can be useful to find good/bad workers.
 
 ## References
+Dirk Hovy, Taylor Berg-Kirkpatrick, Ashish Vaswani, Eduard Hovy, "Learning Whom to Trust with MACE", NAACL 2013.
 http://www.aclweb.org/anthology/N13-1132
