@@ -28,9 +28,10 @@ namespace MACE
             int numItems = reader.getNumItems();
             int numCategories = reader.getNumCategories() + 1;
 
+            Console.WriteLine("*** DATA STATISTICS ***");
             Console.WriteLine("Number of items: " + numItems);
             Console.WriteLine("Number of workers: " + numWorkers);
-            Console.WriteLine("Number of categories: " + numCategories);
+            Console.WriteLine("Number of categories: " + numCategories + "\n");
 
             //
             // model variables
@@ -99,10 +100,10 @@ namespace MACE
 
             InferenceEngine engine = new InferenceEngine();
 
-            Console.WriteLine("*** WORK ITEM LABELS ***");
+            Console.WriteLine("***INFERRED ITEM LABELS ***");
             Discrete[] TMarginal = engine.Infer<Discrete[]>(T);
             for (int item = 0; item < numItems; item++)
-                Console.WriteLine("\t" + TMarginal[item]);
+                Console.WriteLine("\tItem {0}: " + TMarginal[item], item);
 
             Console.WriteLine("\n*** IS SPAMMER ***");
             Bernoulli[][] SMarginal = engine.Infer<Bernoulli[][]>(S);
@@ -111,10 +112,11 @@ namespace MACE
                 Console.WriteLine("Worker #{0}", worker);
                 for (int item = 0; item < numItems; item++)
                 {
-                    Console.WriteLine("\t" + SMarginal[item][worker]);
+                    Console.WriteLine("\tItem {0}: " + SMarginal[item][worker].GetProbTrue(), item);
                 }
             }
 
+            Console.Write("\nPress any key...");
             Console.Read();
 
             return 0;
