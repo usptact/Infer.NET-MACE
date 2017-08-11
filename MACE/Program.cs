@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.IO;
 using MicrosoftResearch.Infer;
 using MicrosoftResearch.Infer.Distributions;
 using MicrosoftResearch.Infer.Maths;
@@ -11,6 +12,20 @@ namespace MACE
     {
         static int Main(string[] args)
         {
+            if (args.Length < 1)
+            {
+                Console.WriteLine("Usage: MACE.exe <CSV>");
+                return 1;
+            }
+
+            string fileName = args[0];
+
+            if (!File.Exists(fileName))
+            {
+                Console.WriteLine("ERROR: The file {0} does not exist!", fileName);
+                return 1;
+            }
+
             //
             // Sample data:
             // 7 workers
@@ -20,7 +35,7 @@ namespace MACE
             // Each item gets 4 answers (data is missing at random, indicated by "-1")
             // True label information is in "true_labels.txt"
             //
-            CsvReader reader = new CsvReader(@"C:\Users\vladislavsd\Documents\Visual Studio 2017\Projects\MACE\MACE\sample_data.txt");
+            CsvReader reader = new CsvReader(fileName);
             reader.read();
             int[][] data = reader.getData();
 
