@@ -9,12 +9,8 @@ namespace MACE
 {
     class Program
     {
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
-            const int numWorkers = 8;
-            const int numItems = 10;
-            const int numCategories = 3;
-
             //
             // Sample data:
             // 7 workers
@@ -22,21 +18,19 @@ namespace MACE
             //  - 7th is a total spammer, always puts 0
             //  - 8th is a perfect worker
             // Each item gets 4 answers (data is missing at random, indicated by "-1")
-            // Item true label is shown in comment
+            // True label information is in "true_labels.txt"
             //
+            CsvReader reader = new CsvReader(@"C:\Users\vladislavsd\Documents\Visual Studio 2017\Projects\MACE\MACE\sample_data.txt");
+            reader.read();
+            int[][] data = reader.getData();
 
-            int[][] data = new int[numItems][];
+            int numWorkers = reader.getNumWorkers();
+            int numItems = reader.getNumItems();
+            int numCategories = reader.getNumCategories() + 1;
 
-            data[0] = new int[] { 0, -1, -1, 1, 0, -1, -1, 0 };   // 0
-            data[1] = new int[] { -1, 2, -1, -1, 1, -1, -1, 0 };   // 0
-            data[2] = new int[] { 1, 1, -1, -1, -1, -1, 0, 1 };   // 1
-            data[3] = new int[] { -1, 1, -1, 1, -1, -1, -1, 1 };   // 1
-            data[4] = new int[] { 1, -1, -1, -1, 1, 1, 0, -1 };   // 1
-            data[5] = new int[] { -1, 2, 1, 2, -1, -1, -1, -1 };   // 1
-            data[6] = new int[] { 0, 0, 2, -1, -1, -1, 0, -1 };   // 0
-            data[7] = new int[] { 1, -1, -1, -1, 0, 0, 0, -1 };   // 1
-            data[8] = new int[] { -1, 1, 1, -1, -1, 0, -1, -1 };   // 1
-            data[9] = new int[] { 2, 0, 2, -1, -1, 2, -1, -1 };   // 2
+            Console.WriteLine("Number of items: " + numItems);
+            Console.WriteLine("Number of workers: " + numWorkers);
+            Console.WriteLine("Number of categories: " + numCategories);
 
             //
             // model variables
@@ -64,21 +58,21 @@ namespace MACE
             // Generative model
             //
 
-            using (Variable.ForEach(n))
+            using (Variable.ForEach(n))                             // loop over items
             {
-                T[n] = Variable.DiscreteUniform(numCategories);
-                using (Variable.ForEach(m))
+                T[n] = Variable.DiscreteUniform(numCategories);     // hidden true label
+                using (Variable.ForEach(m))                         // loop over workers
                 {
-                    S[n][m] = Variable.Bernoulli(theta[m]);
-                    using (Variable.If(A[n][m] > -1))
+                    S[n][m] = Variable.Bernoulli(theta[m]);         // spammer/not spammer?
+                    using (Variable.If(A[n][m] > -1))               // look only at observed data
                     {
                         using (Variable.If(S[n][m] == false))
                         {
-                            A[n][m] = T[n];
+                            A[n][m] = T[n];                         // not spammer: assign hiddern true label
                         }
                         using (Variable.If(S[n][m] == true))
                         {
-                            A[n][m] = Variable.Discrete(ksi[m]);
+                            A[n][m] = Variable.Discrete(ksi[m]);    // spammer: assign label from spammer's "preference" parameter vector
                         }
                     }
                 }
@@ -122,6 +116,8 @@ namespace MACE
             }
 
             Console.Read();
+
+            return 0;
         }
     }
 }
