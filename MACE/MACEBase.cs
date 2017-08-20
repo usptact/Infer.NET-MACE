@@ -24,6 +24,9 @@ namespace MACE
         protected Range n;
         protected Range m;
 
+        protected VariableArray<Beta> thetaPrior;
+        protected VariableArray<Dirichlet> ksiPrior;
+
         public MACEBase()
         {
         }
@@ -40,8 +43,10 @@ namespace MACE
             Tprior = Variable.Array<Discrete>(n);
             Sprior[n][m] = Variable.New<Bernoulli>().ForEach(n).ForEach(m);
 
-            T[n] = Variable.Random<int, Discrete>(Tprior[n]).ForEach(n);
-            S = VariableArray.Random<bool, Bernoulli[][]>(Sprior);
+            T[n] = Variable.Random<int, Discrete>(Tprior[n]);
+            S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
+
+
 
             if (InferenceEngine == null)
             {
