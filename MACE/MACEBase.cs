@@ -24,8 +24,8 @@ namespace MACE
         protected Range n;
         protected Range m;
 
-        protected VariableArray<Beta> thetaPrior;
-        protected VariableArray<Dirichlet> ksiPrior;
+        protected VariableArray<Beta> theta;
+        protected VariableArray<Dirichlet> ksi;
 
         public MACEBase()
         {
@@ -40,9 +40,11 @@ namespace MACE
             n = new Range(numItems);
             m = new Range(numWorkers);
 
+            // no -- set priors instead
             Tprior = Variable.Array<Discrete>(n);
             Sprior[n][m] = Variable.New<Bernoulli>().ForEach(n).ForEach(m);
 
+            // no -- set priors of T and S instead
             T[n] = Variable.Random<int, Discrete>(Tprior[n]);
             S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
 
@@ -56,7 +58,10 @@ namespace MACE
 
         public virtual void SetModelData(ModelData priors)
         {
-
+            //T.ObservedValue = priors.Tprior;    // true labels
+            //S.ObservedValue = priors.Sprior;    // "is spammer"
+            theta.ObservedValue = priors.theta; // "worker trust"
+            ksi.ObservedValue = priors.ksi;     // "spammer's preferences"
         }
     }
 }
