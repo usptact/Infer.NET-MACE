@@ -14,18 +14,14 @@ namespace MACE
         protected Variable<int> numItems;
         protected Variable<int> numCategories;
 
-        protected VariableArray<Discrete> Tprior;
-        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
-
         protected VariableArray<int> T;
         protected VariableArray<VariableArray<bool>, bool[][]> S;
-        protected VariableArray<VariableArray<int>, int[][]> A;      // move to MACETrain?
 
         protected Range n;
         protected Range m;
 
-        protected VariableArray<Beta> theta;
-        protected VariableArray<Dirichlet> ksi;
+        protected VariableArray<Discrete> Sprior;
+        protected VariableArray<Bernoulli[]> Tprior;
 
         public MACEBase()
         {
@@ -40,15 +36,8 @@ namespace MACE
             n = new Range(numItems);
             m = new Range(numWorkers);
 
-            // no -- set priors instead
-            Tprior = Variable.Array<Discrete>(n);
-            Sprior[n][m] = Variable.New<Bernoulli>().ForEach(n).ForEach(m);
-
-            // no -- set priors of T and S instead
-            T[n] = Variable.Random<int, Discrete>(Tprior[n]);
-            S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
-
-
+            var T = Variable.Array<int>(n);
+            var S = Variable.Array(Variable.Array<bool>(m), n);
 
             if (InferenceEngine == null)
             {
@@ -58,10 +47,8 @@ namespace MACE
 
         public virtual void SetModelData(ModelData priors)
         {
-            //T.ObservedValue = priors.Tprior;    // true labels
-            //S.ObservedValue = priors.Sprior;    // "is spammer"
-            theta.ObservedValue = priors.theta; // "worker trust"
-            ksi.ObservedValue = priors.ksi;     // "spammer's preferences"
+            Sprior.ObservedValue = priors.Sprior; // "worker trust"
+            Tprior.ObservedValue = priors.Tprior;     // "spammer's preferences"
         }
     }
 }

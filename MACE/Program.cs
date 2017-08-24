@@ -63,11 +63,11 @@ namespace MACE
             // Parameters and their priors
             //
 
-            var theta = Variable.Array<double>(m).Named("trust");
+            var theta = Variable.Array<double>(m).Named("trust");   // fixed; cannot be changed
             theta[m] = Variable.Random(new Beta(2, 2)).ForEach(m);
 
             double[] initCounts = Enumerable.Repeat<double>(1.0, numCategories).ToArray();
-            var ksi = Variable.Array<Vector>(m).Named("ksi");
+            var ksi = Variable.Array<Vector>(m).Named("ksi");       // fixed; cannot be changed
             ksi[m] = Variable.Random(new Dirichlet(initCounts)).ForEach(m);
 
             //
@@ -115,7 +115,7 @@ namespace MACE
 
             InferenceEngine engine = new InferenceEngine();
 
-            Console.WriteLine("***INFERRED ITEM LABELS ***");
+            Console.WriteLine("*** INFERRED ITEM LABELS ***");
             Discrete[] TMarginal = engine.Infer<Discrete[]>(T);
             for (int item = 0; item < numItems; item++)
                 Console.WriteLine("\tItem {0}: " + TMarginal[item], item);
