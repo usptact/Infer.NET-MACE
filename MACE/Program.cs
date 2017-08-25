@@ -60,15 +60,19 @@ namespace MACE
             var A = Variable.Array(Variable.Array<int>(m), n).Named("Answer");
 
             //
-            // Parameters and their priors
+            // Model parameters and their initialization
             //
 
-            var theta = Variable.Array<double>(m).Named("trust");   // fixed; cannot be changed
-            theta[m] = Variable.Random(new Beta(2, 2)).ForEach(m);
+            var theta = Variable.Array<double>(m).Named("trust");
+            var ksi = Variable.Array<Vector>(m).Named("ksi");
 
             double[] initCounts = Enumerable.Repeat<double>(1.0, numCategories).ToArray();
-            var ksi = Variable.Array<Vector>(m).Named("ksi");       // fixed; cannot be changed
-            ksi[m] = Variable.Random(new Dirichlet(initCounts)).ForEach(m);
+            
+            using (Variable.ForEach(m))
+            {
+                theta[m] = Variable.Random(new Beta(2, 2));
+                ksi[m] = Variable.Random(new Dirichlet(initCounts));
+            }
 
             //
             // Generative model

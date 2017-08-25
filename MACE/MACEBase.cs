@@ -14,14 +14,17 @@ namespace MACE
         protected Variable<int> numItems;
         protected Variable<int> numCategories;
 
-        protected VariableArray<int> T;
-        protected VariableArray<VariableArray<bool>, bool[][]> S;
+        protected VariableArray<int> T;                             // true item labels
+        protected VariableArray<VariableArray<bool>, bool[][]> S;   // item-worker spam pattern
+
+        protected VariableArray<double> theta;                      // is spammer indicator
+        protected VariableArray<Vector> ksi;                        // spamming pattern per worker
 
         protected Range n;
         protected Range m;
 
-        protected VariableArray<Discrete> Sprior;
-        protected VariableArray<Bernoulli[]> Tprior;
+        protected VariableArray<Discrete> Tprior;
+        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
 
         public MACEBase()
         {
@@ -36,8 +39,17 @@ namespace MACE
             n = new Range(numItems);
             m = new Range(numWorkers);
 
-            var T = Variable.Array<int>(n);
-            var S = Variable.Array(Variable.Array<bool>(m), n);
+            // priors
+            Tprior[m] = Variable.New<Discrete>().ForEach(m);
+            Sprior[n][m] = Variable.New<Bernoulli>().ForEach(n).ForEach(m);
+
+            // model variables (hidden RVs)
+            T[m] = Variable.Random<int, Discrete>(Tprior[m]);
+            S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
+
+            // model parameters
+            theta[m] = Variable.New<double>();
+            ksi[m] = Variable.New<Vector>();
 
             if (InferenceEngine == null)
             {
@@ -47,8 +59,8 @@ namespace MACE
 
         public virtual void SetModelData(ModelData priors)
         {
-            Sprior.ObservedValue = priors.Sprior; // "worker trust"
-            Tprior.ObservedValue = priors.Tprior;     // "spammer's preferences"
+            Tprior.ObservedValue = priors.Tprior;
+            Sprior.ObservedValue = priors.Sprior;
         }
     }
 }

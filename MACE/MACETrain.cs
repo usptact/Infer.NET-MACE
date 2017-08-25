@@ -30,7 +30,7 @@ namespace MACE
                 T[n] = Variable.DiscreteUniform(numCategories);
                 using (Variable.ForEach(m))
                 {
-                    S[n][m] = Variable.Bernoulli(Sprior[m]);
+                    S[n][m] = Variable.Bernoulli(theta[m]);
                     using (Variable.If(A[n][m] > -1))
                     {
                         using (Variable.If(S[n][m] == false))
@@ -39,7 +39,7 @@ namespace MACE
                         }
                         using (Variable.If(S[n][m] == true))
                         {
-                            A[n][m] = Variable.Discrete(Tprior[n][m]);
+                            A[n][m] = Variable.Discrete(ksi[m]);
                         }
                     }
                 }
@@ -52,8 +52,8 @@ namespace MACE
         {
             ModelData posteriors = new ModelData();
             A.ObservedValue = data;
-            posteriors.Sprior = InferenceEngine.Infer<Discrete[]>(T);
-            posteriors.Tprior = InferenceEngine.Infer<Bernoulli[][]>(S);
+            posteriors.Tprior = InferenceEngine.Infer<Discrete[]>(T);
+            posteriors.Sprior = InferenceEngine.Infer<Bernoulli[][]>(S);
             return posteriors;
         }
     }

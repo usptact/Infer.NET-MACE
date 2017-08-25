@@ -12,8 +12,8 @@ namespace MACE
 {
     public class ModelData
     {
-        public Discrete[] Sprior;
-        public Bernoulli[][] Tprior;
+        public Discrete[] Tprior;
+        public Bernoulli[][] Sprior;
 
         public ModelData()
         {
