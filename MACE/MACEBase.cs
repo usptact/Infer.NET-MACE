@@ -14,8 +14,13 @@ namespace MACE
         protected Variable<int> numItems;
         protected Variable<int> numCategories;
 
-        protected VariableArray<int> T;                             // true item labels
-        protected VariableArray<VariableArray<bool>, bool[][]> S;   // item-worker spam pattern
+        // true item labels
+        protected VariableArray<Discrete> Tprior;
+        protected VariableArray<int> T;
+
+        // item-worker spam patterns
+        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
+        protected VariableArray<VariableArray<bool>, bool[][]> S;
 
         protected VariableArray<double> theta;                      // is spammer indicator
         protected VariableArray<Vector> ksi;                        // spamming pattern per worker
@@ -23,14 +28,8 @@ namespace MACE
         protected Range n;
         protected Range m;
 
-        protected VariableArray<Discrete> Tprior;
-        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
 
         public MACEBase()
-        {
-        }
-
-        public virtual void CreateModel()
         {
             numWorkers = Variable.New<int>();
             numItems = Variable.New<int>();
@@ -39,13 +38,34 @@ namespace MACE
             n = new Range(numItems);
             m = new Range(numWorkers);
 
-            // priors
-            Tprior[m] = Variable.New<Discrete>().ForEach(m);
-            Sprior[n][m] = Variable.New<Bernoulli>().ForEach(n).ForEach(m);
+            Tprior = Variable.Array<Discrete>(m);
+            T = Variable.Array<int>(n);
 
-            // model variables (hidden RVs)
-            T[m] = Variable.Random<int, Discrete>(Tprior[m]);
-            S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
+            Sprior = Variable.Array(Variable.Array<Bernoulli>(m), n);
+            S = Variable.Array(Variable.Array<bool>(m), n);
+
+            theta = Variable.Array<double>(m);
+            ksi = Variable.Array<Vector>(m);
+        }
+
+        public virtual void CreateModel()
+        {
+            // true label
+            using (Variable.ForEach(m))
+            {
+                Tprior[m] = Variable.New<Discrete>();
+                T[m] = Variable.Random<int, Discrete>(Tprior[m]);
+            }
+
+            // worker-item spamming patterns
+            using (Variable.ForEach(n))
+            {
+                using (Variable.ForEach(m))
+                {
+                    Sprior[n][m] = Variable.New<Bernoulli>();
+                    S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
+                }
+            }
 
             // model parameters
             theta[m] = Variable.New<double>();

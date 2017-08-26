@@ -45,6 +45,8 @@ namespace MACE
                 }
             }
 
+            // prevent engine from trying to infer "A"
+            // "A" can contain negative values that are out of domain
             A.AddAttribute(new DoNotInfer());
         }
 
