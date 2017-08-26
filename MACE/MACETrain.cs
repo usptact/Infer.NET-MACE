@@ -1,11 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using MicrosoftResearch.Infer;
+﻿using MicrosoftResearch.Infer;
 using MicrosoftResearch.Infer.Distributions;
-using MicrosoftResearch.Infer.Maths;
 using MicrosoftResearch.Infer.Models;
 
 namespace MACE
@@ -52,6 +46,7 @@ namespace MACE
 
         public ModelData InferModelData(int[][] data)
         {
+            // !!! data dimensions must match numWorkers x numItems every call!!!
             ModelData posteriors = new ModelData();
             A.ObservedValue = data;
             posteriors.Tprior = InferenceEngine.Infer<Discrete[]>(T);

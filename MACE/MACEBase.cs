@@ -77,6 +77,14 @@ namespace MACE
             }
         }
 
+        public void InitializeLabels(int numItems, int numCategories)
+        {
+            Discrete[] Tinit = new Discrete[numItems];
+            for (int item = 0; item < numItems; item++)
+                Tinit[item] = Discrete.PointMass(Rand.Int(numCategories), numCategories);
+            T.InitialiseTo(Distribution<int>.Array(Tinit));
+        }
+
         public virtual void SetModelData(ModelData priors)
         {
             Tprior.ObservedValue = priors.Tprior;

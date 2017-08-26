@@ -49,6 +49,18 @@ namespace MACE
             Console.WriteLine("Number of categories: " + numCategories + "\n");
 
             //
+            // test
+            //
+
+            // test
+            MACETrain trainer = new MACETrain(numWorkers, numItems, numCategories);
+            trainer.CreateModel();
+            trainer.InitializeLabels(numItems, numCategories);
+            ModelData posterior = trainer.InferModelData(data);
+
+            return 0;
+
+            //
             // model variables
             //
 
