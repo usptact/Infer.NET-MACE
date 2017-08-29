@@ -1,8 +1,8 @@
-﻿using System;
-using MicrosoftResearch.Infer;
+﻿using MicrosoftResearch.Infer;
 using MicrosoftResearch.Infer.Distributions;
 using MicrosoftResearch.Infer.Maths;
 using MicrosoftResearch.Infer.Models;
+
 
 namespace MACE
 {
@@ -35,42 +35,21 @@ namespace MACE
             numItems = Variable.New<int>();
             numCategories = Variable.New<int>();
 
-            n = new Range(numItems);
-            m = new Range(numWorkers);
+            n = new Range(numItems).Named("item");
+            m = new Range(numWorkers).Named("worker");
 
-            Tprior = Variable.Array<Discrete>(m);
-            T = Variable.Array<int>(n);
+            Tprior = Variable.Array<Discrete>(n).Named("T_prior");
+            T = Variable.Array<int>(n).Named("T");
 
-            Sprior = Variable.Array(Variable.Array<Bernoulli>(m), n);
-            S = Variable.Array(Variable.Array<bool>(m), n);
+            Sprior = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_prior");
+            S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
 
-            theta = Variable.Array<double>(m);
-            ksi = Variable.Array<Vector>(m);
+            theta = Variable.Array<double>(m).Named("theta");
+            ksi = Variable.Array<Vector>(m).Named("ksi");
         }
 
         public virtual void CreateModel()
         {
-            // true label
-            using (Variable.ForEach(m))
-            {
-                Tprior[m] = Variable.New<Discrete>();
-                T[m] = Variable.Random<int, Discrete>(Tprior[m]);
-            }
-
-            // worker-item spamming patterns
-            using (Variable.ForEach(n))
-            {
-                using (Variable.ForEach(m))
-                {
-                    Sprior[n][m] = Variable.New<Bernoulli>();
-                    S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
-                }
-            }
-
-            // model parameters
-            theta[m] = Variable.New<double>();
-            ksi[m] = Variable.New<Vector>();
-
             if (InferenceEngine == null)
             {
                 InferenceEngine = new InferenceEngine();

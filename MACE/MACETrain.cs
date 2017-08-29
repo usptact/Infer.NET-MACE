@@ -1,6 +1,8 @@
-﻿using MicrosoftResearch.Infer;
+﻿using System.Linq;
+using MicrosoftResearch.Infer;
 using MicrosoftResearch.Infer.Distributions;
 using MicrosoftResearch.Infer.Models;
+
 
 namespace MACE
 {
@@ -13,6 +15,28 @@ namespace MACE
             this.numWorkers.ObservedValue = numWorkers;
             this.numItems.ObservedValue = numItems;
             this.numCategories.ObservedValue = numCategories;
+
+            using (Variable.ForEach(n))
+            {
+                Tprior[n] = new Discrete(Enumerable.Repeat<double>(1.0/numCategories, numCategories).ToArray());
+            }
+
+            using (Variable.ForEach(n))
+            {
+                using (Variable.ForEach(m))
+                {
+                    Sprior[n][m] = new Bernoulli(0.5);
+                }
+            }
+
+            double[] initCounts = Enumerable.Repeat<double>(1.0, numCategories).ToArray();
+            using (Variable.ForEach(m))
+            {
+                theta[m] = Variable.Random(new Beta(2, 2));
+                ksi[m] = Variable.Random(new Dirichlet(initCounts));
+            }
+
+            A = Variable.Array(Variable.Array<int>(m), n);
         }
 
         public override void CreateModel()
@@ -21,10 +45,12 @@ namespace MACE
 
             using (Variable.ForEach(n))
             {
-                T[n] = Variable.DiscreteUniform(numCategories);
+                //T[n] = Variable.DiscreteUniform(numCategories);
+                T[n] = Variable.Random<int, Discrete>(Tprior[n]);
                 using (Variable.ForEach(m))
                 {
-                    S[n][m] = Variable.Bernoulli(theta[m]);
+                    //S[n][m] = Variable.Bernoulli(theta[m]);
+                    S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
                     using (Variable.If(A[n][m] > -1))
                     {
                         using (Variable.If(S[n][m] == false))

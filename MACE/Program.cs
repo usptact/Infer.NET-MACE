@@ -49,14 +49,18 @@ namespace MACE
             Console.WriteLine("Number of categories: " + numCategories + "\n");
 
             //
-            // test
+            // MACE
             //
 
-            // test
             MACETrain trainer = new MACETrain(numWorkers, numItems, numCategories);
+
             trainer.CreateModel();
             trainer.InitializeLabels(numItems, numCategories);
+
             ModelData posterior = trainer.InferModelData(data);
+
+            for (int item = 0; item < numItems; item++)
+                Console.WriteLine("\tItem {0}: " + posterior.Tprior[item], item);
 
             return 0;
 
