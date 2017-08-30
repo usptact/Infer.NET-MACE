@@ -6,6 +6,8 @@ namespace MACE
     {
         public Discrete[] Tprior;
         public Bernoulli[][] Sprior;
+        public Beta[] thetaPrior;
+        public Dirichlet[] ksiPrior;
 
         public ModelData()
         {

@@ -16,7 +16,6 @@ namespace MACE
             this.numItems.ObservedValue = numItems;
             this.numCategories.ObservedValue = numCategories;
 
-            // set uniform priors
             using (Variable.ForEach(n))
             {
                 Tprior[n] = new Discrete(Enumerable.Repeat<double>(1.0 / numCategories, numCategories).ToArray());
@@ -28,8 +27,13 @@ namespace MACE
 
             using (Variable.ForEach(m))
             {
-                theta[m] = Variable.Random(new Beta(1, 1));
-                ksi[m] = Variable.Random(new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray()));
+                thetaPrior[m] = new Beta(1, 1);
+                theta[m] = Variable.Random<double, Beta>(thetaPrior[m]);
+                //theta[m] = Variable.Random(new Beta(1, 1));
+
+                ksiPrior[m] = new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray());
+                ksi[m] = Variable.Random(ksiPrior[m]);
+                //ksi[m] = Variable.Random(new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray()));
             }
 
             A = Variable.Array(Variable.Array<int>(m), n);
@@ -73,6 +77,8 @@ namespace MACE
             A.ObservedValue = data;
             posteriors.Tprior = InferenceEngine.Infer<Discrete[]>(T);
             posteriors.Sprior = InferenceEngine.Infer<Bernoulli[][]>(S);
+            posteriors.thetaPrior = InferenceEngine.Infer<Beta[]>(theta);
+            posteriors.ksiPrior = InferenceEngine.Infer<Dirichlet[]>(ksi);
             return posteriors;
         }
     }

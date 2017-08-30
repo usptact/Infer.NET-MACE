@@ -22,7 +22,15 @@ namespace MACE
         protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
         protected VariableArray<VariableArray<bool>, bool[][]> S;
 
+        //
         // worker profile
+        //
+
+        // priors
+        protected VariableArray<Beta> thetaPrior;
+        protected VariableArray<Dirichlet> ksiPrior;
+
+        // variables
         protected VariableArray<double> theta;                      // is spammer indicator
         protected VariableArray<Vector> ksi;                        // spamming pattern per worker
 
@@ -45,7 +53,10 @@ namespace MACE
             Sprior = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_prior");
             S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
 
+            thetaPrior = Variable.Array<Beta>(m).Named("theta_prior");
             theta = Variable.Array<double>(m).Named("theta");
+
+            ksiPrior = Variable.Array<Dirichlet>(m).Named("ksi_prior");
             ksi = Variable.Array<Vector>(m).Named("ksi");
         }
 
@@ -69,6 +80,8 @@ namespace MACE
         {
             Tprior.ObservedValue = priors.Tprior;
             Sprior.ObservedValue = priors.Sprior;
+            thetaPrior.ObservedValue = priors.thetaPrior;
+            ksiPrior.ObservedValue = priors.ksiPrior;
         }
     }
 }
