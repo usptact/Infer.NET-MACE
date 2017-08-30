@@ -22,6 +22,7 @@ namespace MACE
         protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
         protected VariableArray<VariableArray<bool>, bool[][]> S;
 
+        // worker profile
         protected VariableArray<double> theta;                      // is spammer indicator
         protected VariableArray<Vector> ksi;                        // spamming pattern per worker
 

@@ -16,24 +16,20 @@ namespace MACE
             this.numItems.ObservedValue = numItems;
             this.numCategories.ObservedValue = numCategories;
 
+            // set uniform priors
             using (Variable.ForEach(n))
             {
-                Tprior[n] = new Discrete(Enumerable.Repeat<double>(1.0/numCategories, numCategories).ToArray());
-            }
-
-            using (Variable.ForEach(n))
-            {
+                Tprior[n] = new Discrete(Enumerable.Repeat<double>(1.0 / numCategories, numCategories).ToArray());
                 using (Variable.ForEach(m))
                 {
                     Sprior[n][m] = new Bernoulli(0.5);
                 }
             }
 
-            double[] initCounts = Enumerable.Repeat<double>(1.0, numCategories).ToArray();
             using (Variable.ForEach(m))
             {
-                theta[m] = Variable.Random(new Beta(2, 2));
-                ksi[m] = Variable.Random(new Dirichlet(initCounts));
+                theta[m] = Variable.Random(new Beta(1, 1));
+                ksi[m] = Variable.Random(new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray()));
             }
 
             A = Variable.Array(Variable.Array<int>(m), n);
@@ -55,11 +51,11 @@ namespace MACE
                     {
                         using (Variable.If(S[n][m] == false))
                         {
-                            A[n][m] = T[n];
+                            A[n][m] = T[n];                         // not spammer: assign true label
                         }
                         using (Variable.If(S[n][m] == true))
                         {
-                            A[n][m] = Variable.Discrete(ksi[m]);
+                            A[n][m] = Variable.Discrete(ksi[m]);    // spammer: assign label according to his profile
                         }
                     }
                 }
