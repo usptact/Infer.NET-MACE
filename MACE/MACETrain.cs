@@ -17,23 +17,19 @@ namespace MACE
             this.numCategories.ObservedValue = numCategories;
 
             using (Variable.ForEach(n))
+                T_dist[n] = new Discrete(Enumerable.Repeat<double>(1.0 / numCategories, numCategories).ToArray());   
+
+            using (Variable.ForEach(m))
             {
-                Tprior[n] = new Discrete(Enumerable.Repeat<double>(1.0 / numCategories, numCategories).ToArray());
-                using (Variable.ForEach(m))
-                {
-                    Sprior[n][m] = new Bernoulli(0.5);
-                }
+                Bernoulli temp = new Bernoulli(0.5);
+                using (Variable.ForEach(n))
+                    S_dist[n][m] = temp;
             }
 
             using (Variable.ForEach(m))
             {
-                thetaPrior[m] = new Beta(1, 1);
-                theta[m] = Variable.Random<double, Beta>(thetaPrior[m]);
-                //theta[m] = Variable.Random(new Beta(1, 1));
-
-                ksiPrior[m] = new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray());
-                ksi[m] = Variable.Random<Vector, Dirichlet>(ksiPrior[m]);
-                //ksi[m] = Variable.Random(new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray()));
+                ksi_dist[m] = new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray());
+                ksi[m] = Variable.Random<Vector, Dirichlet>(ksi_dist[m]);
             }
 
             A = Variable.Array(Variable.Array<int>(m), n);
@@ -45,22 +41,16 @@ namespace MACE
 
             using (Variable.ForEach(n))
             {
-                //T[n] = Variable.DiscreteUniform(numCategories);
-                T[n] = Variable.Random<int, Discrete>(Tprior[n]);
+                T[n] = Variable.Random<int, Discrete>(T_dist[n]);
                 using (Variable.ForEach(m))
                 {
-                    //S[n][m] = Variable.Bernoulli(theta[m]);
-                    S[n][m] = Variable.Random<bool, Bernoulli>(Sprior[n][m]);
-                    using (Variable.If(A[n][m] > -1))
+                    S[n][m] = Variable.Random<bool, Bernoulli>(S_dist[n][m]);
+                    using (Variable.If(A[n][m] > -1))               // loop over observed data only
                     {
                         using (Variable.If(S[n][m] == false))
-                        {
                             A[n][m] = T[n];                         // not spammer: assign true label
-                        }
                         using (Variable.If(S[n][m] == true))
-                        {
                             A[n][m] = Variable.Discrete(ksi[m]);    // spammer: assign label according to his profile
-                        }
                     }
                 }
             }
@@ -75,10 +65,9 @@ namespace MACE
             // !!! data dimensions must match numWorkers x numItems every call!!!
             ModelData posteriors = new ModelData();
             A.ObservedValue = data;
-            posteriors.Tprior = InferenceEngine.Infer<Discrete[]>(T);
-            posteriors.Sprior = InferenceEngine.Infer<Bernoulli[][]>(S);
-            posteriors.thetaPrior = InferenceEngine.Infer<Beta[]>(theta);
-            posteriors.ksiPrior = InferenceEngine.Infer<Dirichlet[]>(ksi);
+            posteriors.T_dist = InferenceEngine.Infer<Discrete[]>(T);
+            posteriors.S_dist = InferenceEngine.Infer<Bernoulli[][]>(S);
+            posteriors.ksi_dist = InferenceEngine.Infer<Dirichlet[]>(ksi);
             return posteriors;
         }
     }

@@ -4,10 +4,10 @@ namespace MACE
 {
     public class ModelData
     {
-        public Discrete[] Tprior;
-        public Bernoulli[][] Sprior;
-        public Beta[] thetaPrior;
-        public Dirichlet[] ksiPrior;
+        public Discrete[] T_dist;
+        public Bernoulli[][] S_dist;
+
+        public Dirichlet[] ksi_dist;
 
         public ModelData()
         {

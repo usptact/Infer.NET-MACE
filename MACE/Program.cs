@@ -56,21 +56,18 @@ namespace MACE
 
             trainer.CreateModel();
             trainer.InitializeLabels(numItems, numCategories);
-
             ModelData posterior = trainer.InferModelData(data);
 
             Console.WriteLine("*** INFERRED ITEM LABELS ***");
             for (int item = 0; item < numItems; item++)
-                Console.WriteLine("\tItem {0}: " + posterior.Tprior[item], item);
+                Console.WriteLine("\tItem {0}: " + posterior.T_dist[item], item);
 
             Console.WriteLine("\n*** IS SPAMMER ***");
             for (int worker = 0; worker < numWorkers; worker++)
             {
                 Console.WriteLine("Worker #{0}", worker);
                 for (int item = 0; item < numItems; item++)
-                {
-                    Console.WriteLine("\tItem {0}: " + posterior.Sprior[item][worker].GetProbTrue(), item);
-                }
+                    Console.WriteLine("\tItem {0}: " + posterior.S_dist[item][worker].GetProbTrue(), item);
             }
 
             Console.Write("\nPress any key...");

@@ -15,11 +15,11 @@ namespace MACE
         protected Variable<int> numCategories;
 
         // true item labels
-        protected VariableArray<Discrete> Tprior;
+        protected VariableArray<Discrete> T_dist;
         protected VariableArray<int> T;
 
         // item-worker spam patterns
-        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> Sprior;
+        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> S_dist;
         protected VariableArray<VariableArray<bool>, bool[][]> S;
 
         //
@@ -27,11 +27,9 @@ namespace MACE
         //
 
         // priors
-        protected VariableArray<Beta> thetaPrior;
-        protected VariableArray<Dirichlet> ksiPrior;
+        protected VariableArray<Dirichlet> ksi_dist;
 
         // variables
-        protected VariableArray<double> theta;                      // is spammer indicator
         protected VariableArray<Vector> ksi;                        // spamming pattern per worker
 
         protected Range n;
@@ -47,27 +45,24 @@ namespace MACE
             n = new Range(numItems).Named("item");
             m = new Range(numWorkers).Named("worker");
 
-            Tprior = Variable.Array<Discrete>(n).Named("T_prior");
-            Sprior = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_prior");
-            thetaPrior = Variable.Array<Beta>(m).Named("theta_prior");
-            ksiPrior = Variable.Array<Dirichlet>(m).Named("ksi_prior");
+            T_dist = Variable.Array<Discrete>(n).Named("T_dist");
+            S_dist = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_dist");
+            ksi_dist = Variable.Array<Dirichlet>(m).Named("ksi_prior");
 
             T = Variable.Array<int>(n).Named("T");
             S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
-            theta = Variable.Array<double>(m).Named("theta");
             ksi = Variable.Array<Vector>(m).Named("ksi");
         }
 
         public virtual void CreateModel()
         {
             if (InferenceEngine == null)
-            {
                 InferenceEngine = new InferenceEngine();
-            }
         }
 
         public void InitializeLabels(int numItems, int numCategories)
         {
+            // initialize true labels array with random label assignments to break symmetry
             Discrete[] Tinit = new Discrete[numItems];
             for (int item = 0; item < numItems; item++)
                 Tinit[item] = Discrete.PointMass(Rand.Int(numCategories), numCategories);
@@ -76,10 +71,9 @@ namespace MACE
 
         public virtual void SetModelData(ModelData priors)
         {
-            Tprior.ObservedValue = priors.Tprior;
-            Sprior.ObservedValue = priors.Sprior;
-            thetaPrior.ObservedValue = priors.thetaPrior;
-            ksiPrior.ObservedValue = priors.ksiPrior;
+            T_dist.ObservedValue = priors.T_dist;
+            S_dist.ObservedValue = priors.S_dist;
+            ksi_dist.ObservedValue = priors.ksi_dist;
         }
     }
 }
