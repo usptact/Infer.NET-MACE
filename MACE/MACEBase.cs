@@ -48,15 +48,13 @@ namespace MACE
             m = new Range(numWorkers).Named("worker");
 
             Tprior = Variable.Array<Discrete>(n).Named("T_prior");
-            T = Variable.Array<int>(n).Named("T");
-
             Sprior = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_prior");
-            S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
-
             thetaPrior = Variable.Array<Beta>(m).Named("theta_prior");
-            theta = Variable.Array<double>(m).Named("theta");
-
             ksiPrior = Variable.Array<Dirichlet>(m).Named("ksi_prior");
+
+            T = Variable.Array<int>(n).Named("T");
+            S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
+            theta = Variable.Array<double>(m).Named("theta");
             ksi = Variable.Array<Vector>(m).Named("ksi");
         }
 

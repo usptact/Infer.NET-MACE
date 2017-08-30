@@ -2,7 +2,7 @@
 using MicrosoftResearch.Infer;
 using MicrosoftResearch.Infer.Distributions;
 using MicrosoftResearch.Infer.Models;
-
+using MicrosoftResearch.Infer.Maths;
 
 namespace MACE
 {
@@ -32,7 +32,7 @@ namespace MACE
                 //theta[m] = Variable.Random(new Beta(1, 1));
 
                 ksiPrior[m] = new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray());
-                ksi[m] = Variable.Random(ksiPrior[m]);
+                ksi[m] = Variable.Random<Vector, Dirichlet>(ksiPrior[m]);
                 //ksi[m] = Variable.Random(new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray()));
             }
 
