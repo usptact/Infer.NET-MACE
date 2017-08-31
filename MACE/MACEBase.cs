@@ -27,9 +27,11 @@ namespace MACE
         //
 
         // priors
+        protected VariableArray<Bernoulli> theta_dist;
         protected VariableArray<Dirichlet> ksi_dist;
 
         // variables
+        protected VariableArray<bool> theta;
         protected VariableArray<Vector> ksi;                        // spamming pattern per worker
 
         protected Range n;
@@ -46,11 +48,12 @@ namespace MACE
             m = new Range(numWorkers).Named("worker");
 
             T_dist = Variable.Array<Discrete>(n).Named("T_dist");
-            S_dist = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_dist");
-            ksi_dist = Variable.Array<Dirichlet>(m).Named("ksi_prior");
+            theta_dist = Variable.Array<Bernoulli>(m).Named("theta_dist");
+            ksi_dist = Variable.Array<Dirichlet>(m).Named("ksi_dist");
 
             T = Variable.Array<int>(n).Named("T");
             S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
+            theta = Variable.Array<bool>(m).Named("theta");
             ksi = Variable.Array<Vector>(m).Named("ksi");
         }
 
@@ -72,7 +75,7 @@ namespace MACE
         public virtual void SetModelData(ModelData priors)
         {
             T_dist.ObservedValue = priors.T_dist;
-            S_dist.ObservedValue = priors.S_dist;
+            theta_dist.ObservedValue = priors.theta_dist;
             ksi_dist.ObservedValue = priors.ksi_dist;
         }
     }

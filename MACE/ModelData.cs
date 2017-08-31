@@ -1,13 +1,13 @@
-﻿using MicrosoftResearch.Infer.Distributions;
+﻿using MicrosoftResearch.Infer.Models;
+using MicrosoftResearch.Infer.Distributions;
 
 namespace MACE
 {
     public class ModelData
     {
-        public Discrete[] T_dist;
-        public Bernoulli[][] S_dist;
-
-        public Dirichlet[] ksi_dist;
+        public VariableArray<Discrete> T_dist;
+        public VariableArray<Bernoulli> theta_dist;
+        public VariableArray<Dirichlet> ksi_dist;
 
         public ModelData()
         {
