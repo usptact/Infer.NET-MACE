@@ -5,9 +5,10 @@ namespace MACE
 {
     public class ModelData
     {
-        public VariableArray<Discrete> T_dist;
-        public VariableArray<Bernoulli> theta_dist;
-        public VariableArray<Dirichlet> ksi_dist;
+        public Discrete[] T_dist;
+        public Bernoulli[][] S_dist;
+        public Bernoulli[] theta_dist;
+        public Dirichlet[] ksi_dist;
 
         public ModelData()
         {

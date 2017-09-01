@@ -48,6 +48,7 @@ namespace MACE
             m = new Range(numWorkers).Named("worker");
 
             T_dist = Variable.Array<Discrete>(n).Named("T_dist");
+            S_dist = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_dist");
             theta_dist = Variable.Array<Bernoulli>(m).Named("theta_dist");
             ksi_dist = Variable.Array<Dirichlet>(m).Named("ksi_dist");
 
@@ -74,9 +75,10 @@ namespace MACE
 
         public virtual void SetModelData(ModelData priors)
         {
-            T_dist = priors.T_dist;
-            theta_dist = priors.theta_dist;
-            ksi_dist = priors.ksi_dist;
+            T_dist.ObservedValue = priors.T_dist;
+            S_dist.ObservedValue = priors.S_dist;
+            theta_dist.ObservedValue = priors.theta_dist;
+            ksi_dist.ObservedValue = priors.ksi_dist;
         }
     }
 }

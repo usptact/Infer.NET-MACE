@@ -16,22 +16,20 @@ namespace MACE
             this.numItems.ObservedValue = numItems;
             this.numCategories.ObservedValue = numCategories;
 
-            // init true label RV priors -- uniform discrete
-            for (int i = 0; i < numItems; i++)
-                T_dist[i] = new Discrete(Enumerable.Repeat<double>(1.0 / numCategories, numCategories).ToArray());
-
-            // init worker RV priors
-            for (int j = 0; j < numWorkers; j++)
+            using (Variable.ForEach(n))
             {
-                theta_dist[j] = new Bernoulli(0.5);
-                ksi_dist[j] = new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray());
+                T_dist[n] = Discrete.Uniform(numCategories);
+                using (Variable.ForEach(m))
+                    S_dist[n][m] = Bernoulli.Uniform();
             }
 
-            // attaching priors to respective RVs
+            // init true label RV priors -- uniform discrete
             using (Variable.ForEach(m))
             {
-                theta[m] = Variable.Random<bool, Bernoulli>(theta_dist[m]);
-                ksi[m] = Variable.Random<Vector, Dirichlet>(ksi_dist[m]);
+                theta_dist[m] = Bernoulli.Uniform();
+                ksi_dist[m] = Dirichlet.Uniform(numCategories);
+				theta[m] = Variable.Random<bool, Bernoulli>(theta_dist[m]);
+				ksi[m] = Variable.Random<Vector, Dirichlet>(ksi_dist[m]);
             }
 
             A = Variable.Array(Variable.Array<int>(m), n);
@@ -47,7 +45,6 @@ namespace MACE
                 using (Variable.ForEach(m))
                 {
                     S[n][m] = Variable.Random<bool, Bernoulli>(theta_dist[m]);
-                    //S[n][m] = Variable.Random<bool, Bernoulli>(S_dist[n][m]);
                     using (Variable.If(A[n][m] > -1))               // loop over observed data only
                     {
                         using (Variable.If(S[n][m] == false))
@@ -68,9 +65,10 @@ namespace MACE
             // !!! data dimensions must match numWorkers x numItems every call!!!
             ModelData posteriors = new ModelData();
             A.ObservedValue = data;
-            posteriors.T_dist.ObservedValue = InferenceEngine.Infer<Discrete[]>(T);
-            posteriors.theta_dist.ObservedValue = InferenceEngine.Infer<Bernoulli[]>(theta);
-            posteriors.ksi_dist.ObservedValue = InferenceEngine.Infer<Dirichlet[]>(ksi);
+            posteriors.T_dist = InferenceEngine.Infer<Discrete[]>(T);
+            posteriors.S_dist = InferenceEngine.Infer<Bernoulli[][]>(S);
+            posteriors.theta_dist = InferenceEngine.Infer<Bernoulli[]>(theta);
+            posteriors.ksi_dist = InferenceEngine.Infer<Dirichlet[]>(ksi);
             return posteriors;
         }
     }
