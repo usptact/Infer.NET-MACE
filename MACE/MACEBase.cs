@@ -74,9 +74,9 @@ namespace MACE
 
         public virtual void SetModelData(ModelData priors)
         {
-            T_dist.ObservedValue = priors.T_dist;
-            theta_dist.ObservedValue = priors.theta_dist;
-            ksi_dist.ObservedValue = priors.ksi_dist;
+            T_dist = priors.T_dist;
+            theta_dist = priors.theta_dist;
+            ksi_dist = priors.ksi_dist;
         }
     }
 }

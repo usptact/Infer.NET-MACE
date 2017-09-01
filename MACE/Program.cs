@@ -62,6 +62,7 @@ namespace MACE
             for (int item = 0; item < numItems; item++)
                 Console.WriteLine("\tItem {0}: " + posterior.T_dist[item], item);
 
+            /*
             Console.WriteLine("\n*** IS SPAMMER ***");
             for (int worker = 0; worker < numWorkers; worker++)
             {
@@ -69,6 +70,7 @@ namespace MACE
                 for (int item = 0; item < numItems; item++)
                     Console.WriteLine("\tItem {0}: " + posterior.S_dist[item][worker].GetProbTrue(), item);
             }
+            */
 
             Console.Write("\nPress any key...");
             Console.Read();
