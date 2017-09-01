@@ -7,8 +7,6 @@ namespace MACE
     {
         public Discrete[] T_dist;
         public Bernoulli[][] S_dist;
-        public Bernoulli[] theta_dist;
-        public Dirichlet[] ksi_dist;
 
         public ModelData()
         {

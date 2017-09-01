@@ -13,30 +13,16 @@ namespace MACE
         protected Variable<int> numWorkers;
         protected Variable<int> numItems;
         protected Variable<int> numCategories;
-
-        // true item labels
-        protected VariableArray<Discrete> T_dist;
+        
+        // model variables
         protected VariableArray<int> T;
-
-        // item-worker spam patterns
-        protected VariableArray<VariableArray<Bernoulli>, Bernoulli[][]> S_dist;
         protected VariableArray<VariableArray<bool>, bool[][]> S;
 
-        //
-        // worker profile
-        //
-
-        // priors
-        protected VariableArray<Bernoulli> theta_dist;
-        protected VariableArray<Dirichlet> ksi_dist;
-
-        // variables
-        protected VariableArray<bool> theta;
-        protected VariableArray<Vector> ksi;                        // spamming pattern per worker
+        protected VariableArray<double> theta;
+        protected VariableArray<Vector> phi;
 
         protected Range n;
         protected Range m;
-
 
         public MACEBase()
         {
@@ -47,19 +33,18 @@ namespace MACE
             n = new Range(numItems).Named("item");
             m = new Range(numWorkers).Named("worker");
 
-            T_dist = Variable.Array<Discrete>(n).Named("T_dist");
-            S_dist = Variable.Array(Variable.Array<Bernoulli>(m), n).Named("S_dist");
-            theta_dist = Variable.Array<Bernoulli>(m).Named("theta_dist");
-            ksi_dist = Variable.Array<Dirichlet>(m).Named("ksi_dist");
+            T = Variable.Array<int>(n);
+            S = Variable.Array(Variable.Array<bool>(m), n);
 
-            T = Variable.Array<int>(n).Named("T");
-            S = Variable.Array(Variable.Array<bool>(m), n).Named("S");
-            theta = Variable.Array<bool>(m).Named("theta");
-            ksi = Variable.Array<Vector>(m).Named("ksi");
+            theta = Variable.Array<double>(m);
+            phi = Variable.Array<Vector>(m);
         }
 
         public virtual void CreateModel()
         {
+            theta[m] = Variable.Beta(1, 1).ForEach(m);
+            phi[m] = Variable.DirichletUniform(numCategories).ForEach(m);
+
             if (InferenceEngine == null)
                 InferenceEngine = new InferenceEngine();
         }
@@ -71,14 +56,6 @@ namespace MACE
             for (int item = 0; item < numItems; item++)
                 Tinit[item] = Discrete.PointMass(Rand.Int(numCategories), numCategories);
             T.InitialiseTo(Distribution<int>.Array(Tinit));
-        }
-
-        public virtual void SetModelData(ModelData priors)
-        {
-            T_dist.ObservedValue = priors.T_dist;
-            S_dist.ObservedValue = priors.S_dist;
-            theta_dist.ObservedValue = priors.theta_dist;
-            ksi_dist.ObservedValue = priors.ksi_dist;
         }
     }
 }
