@@ -49,25 +49,44 @@ namespace MACE
             Console.WriteLine("Number of categories: " + numCategories + "\n");
 
             //
-            // MACE
+            // MACE: Init priors
+            //
+
+            ModelData initPriors = new ModelData();
+
+            Beta[] thetaDist = new Beta[numWorkers];
+            Dirichlet[] phiDist = new Dirichlet[numWorkers];
+            for (int i = 0; i < numWorkers; i++)
+            {
+                thetaDist[i] = new Beta(1, 1);
+                phiDist[i] = new Dirichlet(Enumerable.Repeat<double>(1.0, numCategories).ToArray());
+            }
+
+            initPriors.thetaDist = thetaDist;
+            initPriors.phiDist = phiDist;
+
+            //
+            // MACE: Instantiate & run model trainer
             //
 
             MACETrain trainer = new MACETrain(numWorkers, numItems, numCategories);
 
             trainer.CreateModel();
             trainer.InitializeLabels(numItems, numCategories);
+            trainer.SetModelData(initPriors);
+
             ModelData posterior = trainer.InferModelData(data);
 
             Console.WriteLine("*** INFERRED ITEM LABELS ***");
             for (int item = 0; item < numItems; item++)
-                Console.WriteLine("\tItem {0}: " + posterior.T_dist[item], item);
+                Console.WriteLine("\tItem {0}: " + posterior.TDist[item], item);
 
             Console.WriteLine("\n*** IS SPAMMER ***");
             for (int worker = 0; worker < numWorkers; worker++)
             {
                 Console.WriteLine("Worker #{0}", worker);
                 for (int item = 0; item < numItems; item++)
-                    Console.WriteLine("\tItem {0}: " + posterior.S_dist[item][worker].GetProbTrue(), item);
+                    Console.WriteLine("\tItem {0}: " + posterior.SDist[item][worker].GetProbTrue(), item);
             }
 
             Console.Write("\nPress any key...");

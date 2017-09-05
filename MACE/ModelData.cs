@@ -5,8 +5,13 @@ namespace MACE
 {
     public class ModelData
     {
-        public Discrete[] T_dist;
-        public Bernoulli[][] S_dist;
+        // shared model parameters
+        public Beta[] thetaDist;
+        public Dirichlet[] phiDist;
+
+        // data-specific parameters
+        public Discrete[] TDist;
+        public Bernoulli[][] SDist;
 
         public ModelData()
         {

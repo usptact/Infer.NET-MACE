@@ -49,9 +49,15 @@ namespace MACE
         {
             // !!! data dimensions must match numWorkers x numItems every call!!!
             ModelData posteriors = new ModelData();
+
             A.ObservedValue = data;
-            posteriors.T_dist = InferenceEngine.Infer<Discrete[]>(T);
-            posteriors.S_dist = InferenceEngine.Infer<Bernoulli[][]>(S);
+
+            posteriors.thetaDist = InferenceEngine.Infer<Beta[]>(theta);
+            posteriors.phiDist = InferenceEngine.Infer<Dirichlet[]>(phi);
+
+            posteriors.TDist = InferenceEngine.Infer<Discrete[]>(T);
+            posteriors.SDist = InferenceEngine.Infer<Bernoulli[][]>(S);
+
             return posteriors;
         }
     }
