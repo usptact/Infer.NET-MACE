@@ -14,13 +14,15 @@ namespace MACE
         protected Variable<int> numItems;
         protected Variable<int> numCategories;
         
-        // model variables
+        // data-specific model variables
         protected VariableArray<int> T;
         protected VariableArray<VariableArray<bool>, bool[][]> S;
 
+        // shared RV priors
         protected VariableArray<Beta> thetaPriors;
         protected VariableArray<Dirichlet> phiPriors;
 
+        // shared RVs
         protected VariableArray<double> theta;
         protected VariableArray<Vector> phi;
 
@@ -39,11 +41,11 @@ namespace MACE
             T = Variable.Array<int>(n);
             S = Variable.Array(Variable.Array<bool>(m), n);
 
-            thetaPriors = Variable.Array<Beta>(m);
-            phiPriors = Variable.Array<Dirichlet>(m);
+            thetaPriors = Variable.Array<Beta>(m).Named("thetaPrior");
+            phiPriors = Variable.Array<Dirichlet>(m).Named("phiPrior");
 
-            theta = Variable.Array<double>(m);
-            phi = Variable.Array<Vector>(m);
+            theta = Variable.Array<double>(m).Named("theta");
+            phi = Variable.Array<Vector>(m).Named("phi");
         }
 
         public virtual void CreateModel()
@@ -53,8 +55,6 @@ namespace MACE
                 theta[m] = Variable.Random<double, Beta>(thetaPriors[m]);
                 phi[m] = Variable.Random<Vector, Dirichlet>(phiPriors[m]);
             }
-            //theta[m] = Variable.Beta(1, 1).ForEach(m);
-            //phi[m] = Variable.DirichletUniform(numCategories).ForEach(m);
 
             if (InferenceEngine == null)
                 InferenceEngine = new InferenceEngine();

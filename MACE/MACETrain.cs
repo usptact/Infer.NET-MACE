@@ -8,8 +8,9 @@ namespace MACE
 {
     public class MACETrain : MACEBase
     {
-        protected VariableArray<Discrete> A_prior;
+        // worker-item matrix with votes -- (partially) observed
         protected VariableArray<VariableArray<int>, int[][]> A;
+        
 
         public MACETrain(int numWorkers, int numItems, int numCategories)
         {
