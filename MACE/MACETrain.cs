@@ -1,8 +1,6 @@
-﻿using System.Linq;
-using MicrosoftResearch.Infer;
-using MicrosoftResearch.Infer.Distributions;
-using MicrosoftResearch.Infer.Models;
-using MicrosoftResearch.Infer.Maths;
+﻿using Microsoft.ML.Probabilistic.Distributions;
+using Microsoft.ML.Probabilistic.Models;
+using Microsoft.ML.Probabilistic.Models.Attributes;
 
 namespace MACE
 {

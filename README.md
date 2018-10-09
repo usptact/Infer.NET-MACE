@@ -23,3 +23,6 @@ First block of the output is true label estimate for each work item. The second 
 ## References
 Dirk Hovy, Taylor Berg-Kirkpatrick, Ashish Vaswani, Eduard Hovy, "Learning Whom to Trust with MACE", NAACL 2013.
 http://www.aclweb.org/anthology/N13-1132
+
+## License
+Updated to use open source Infer.NET.
