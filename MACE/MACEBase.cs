@@ -2,76 +2,127 @@
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Math;
 
-
 namespace MACE
 {
-    public class MACEBase
+    /// <summary>
+    /// Base class for the MACE (Multi-Annotator Competence Estimation) model.
+    /// This class defines the probabilistic model structure for crowdsourcing annotation quality estimation.
+    /// </summary>
+    public abstract class MACEBase
     {
-        public InferenceEngine InferenceEngine;
+        /// <summary>
+        /// The inference engine used for probabilistic inference.
+        /// </summary>
+        public InferenceEngine InferenceEngine { get; protected set; } = null!;
 
-        protected Variable<int> numWorkers;
-        protected Variable<int> numItems;
-        protected Variable<int> numCategories;
+        // Model dimensions
+        protected Variable<int> _numWorkers;
+        protected Variable<int> _numItems;
+        protected Variable<int> _numCategories;
         
-        // data-specific model variables
-        protected VariableArray<int> T;
-        protected VariableArray<VariableArray<bool>, bool[][]> S;
+        // Data-specific model variables
+        protected VariableArray<int> _trueLabels; // T: true labels for each item
+        protected VariableArray<VariableArray<bool>, bool[][]> _spammerIndicators; // S: whether each worker is spamming on each item
 
-        // shared RV priors
-        protected VariableArray<Beta> thetaPriors;
-        protected VariableArray<Dirichlet> phiPriors;
+        // Prior distributions for shared random variables
+        protected VariableArray<Beta> _thetaPriors; // Priors for worker spammer probabilities
+        protected VariableArray<Dirichlet> _phiPriors; // Priors for worker label preferences when spamming
 
-        // shared RVs
-        protected VariableArray<double> theta;
-        protected VariableArray<Vector> phi;
+        // Shared random variables
+        protected VariableArray<double> _theta; // Worker spammer probabilities
+        protected VariableArray<Vector> _phi; // Worker label preferences when spamming
 
-        protected Range n;
-        protected Range m;
+        // Ranges for indexing
+        protected Microsoft.ML.Probabilistic.Models.Range _itemRange;
+        protected Microsoft.ML.Probabilistic.Models.Range _workerRange;
 
-        public MACEBase()
+        /// <summary>
+        /// Initializes a new instance of the MACEBase class.
+        /// </summary>
+        protected MACEBase()
         {
-            numWorkers = Variable.New<int>();
-            numItems = Variable.New<int>();
-            numCategories = Variable.New<int>();
+            _numWorkers = Variable.New<int>();
+            _numItems = Variable.New<int>();
+            _numCategories = Variable.New<int>();
 
-            n = new Range(numItems).Named("item");
-            m = new Range(numWorkers).Named("worker");
+            _itemRange = new Microsoft.ML.Probabilistic.Models.Range(_numItems).Named("item");
+            _workerRange = new Microsoft.ML.Probabilistic.Models.Range(_numWorkers).Named("worker");
 
-            T = Variable.Array<int>(n);
-            S = Variable.Array(Variable.Array<bool>(m), n);
+            _trueLabels = Variable.Array<int>(_itemRange);
+            _spammerIndicators = Variable.Array(Variable.Array<bool>(_workerRange), _itemRange);
 
-            thetaPriors = Variable.Array<Beta>(m).Named("thetaPrior");
-            phiPriors = Variable.Array<Dirichlet>(m).Named("phiPrior");
+            _thetaPriors = Variable.Array<Beta>(_workerRange).Named("thetaPrior");
+            _phiPriors = Variable.Array<Dirichlet>(_workerRange).Named("phiPrior");
 
-            theta = Variable.Array<double>(m).Named("theta");
-            phi = Variable.Array<Vector>(m).Named("phi");
+            _theta = Variable.Array<double>(_workerRange).Named("theta");
+            _phi = Variable.Array<Vector>(_workerRange).Named("phi");
         }
 
+        /// <summary>
+        /// Creates the probabilistic model structure.
+        /// This method should be overridden by derived classes to define the complete model.
+        /// </summary>
         public virtual void CreateModel()
         {
-            using (Variable.ForEach(m))
+            // Define the prior distributions for worker parameters
+            using (Variable.ForEach(_workerRange))
             {
-                theta[m] = Variable.Random<double, Beta>(thetaPriors[m]);
-                phi[m] = Variable.Random<Vector, Dirichlet>(phiPriors[m]);
+                _theta[_workerRange] = Variable.Random<double, Beta>(_thetaPriors[_workerRange]);
+                _phi[_workerRange] = Variable.Random<Vector, Dirichlet>(_phiPriors[_workerRange]);
             }
 
+            // Initialize inference engine if not already done
             if (InferenceEngine == null)
+            {
                 InferenceEngine = new InferenceEngine();
+            }
         }
 
+        /// <summary>
+        /// Sets the prior distributions for the model parameters.
+        /// </summary>
+        /// <param name="modelData">ModelData containing the prior distributions.</param>
+        /// <exception cref="ArgumentNullException">Thrown when modelData is null.</exception>
         public virtual void SetModelData(ModelData modelData)
         {
-            thetaPriors.ObservedValue = modelData.thetaDist;
-            phiPriors.ObservedValue = modelData.phiDist;
+            if (modelData == null)
+            {
+                throw new ArgumentNullException(nameof(modelData));
+            }
+
+            _thetaPriors.ObservedValue = modelData.ThetaDist;
+            _phiPriors.ObservedValue = modelData.PhiDist;
         }
 
+        /// <summary>
+        /// Initializes the true labels with random assignments to break symmetry.
+        /// This is important for proper convergence of the inference algorithm.
+        /// </summary>
+        /// <param name="numItems">Number of items in the dataset.</param>
+        /// <param name="numCategories">Number of possible label categories.</param>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when numItems or numCategories is non-positive.</exception>
         public void InitializeLabels(int numItems, int numCategories)
         {
-            // initialize true labels array with random label assignments to break symmetry
-            Discrete[] Tinit = new Discrete[numItems];
+            if (numItems <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(numItems), "Number of items must be positive.");
+            }
+
+            if (numCategories <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
+            }
+
+            // Initialize true labels array with random label assignments to break symmetry
+            var initialLabels = new Discrete[numItems];
             for (int item = 0; item < numItems; item++)
-                Tinit[item] = Discrete.PointMass(Rand.Int(numCategories), numCategories);
-            T.InitialiseTo(Distribution<int>.Array(Tinit));
+            {
+                // Randomly assign a label to break symmetry
+                int randomLabel = Rand.Int(numCategories);
+                initialLabels[item] = Discrete.PointMass(randomLabel, numCategories);
+            }
+            
+            _trueLabels.InitialiseTo(Distribution<int>.Array(initialLabels));
         }
     }
 }

@@ -4,58 +4,131 @@ using Microsoft.ML.Probabilistic.Models.Attributes;
 
 namespace MACE
 {
+    /// <summary>
+    /// Implements the MACE (Multi-Annotator Competence Estimation) model for crowdsourcing annotation quality estimation.
+    /// This class extends MACEBase to define the complete probabilistic model including the observation model.
+    /// </summary>
     public class MACETrain : MACEBase
     {
-        // worker-item matrix with votes -- (partially) observed
-        protected VariableArray<VariableArray<int>, int[][]> A;
-        
+        /// <summary>
+        /// Worker-item annotation matrix containing the observed votes (partially observed).
+        /// A[item][worker] contains the annotation for that item-worker pair, or -1 for missing annotations.
+        /// </summary>
+        protected VariableArray<VariableArray<int>, int[][]> _annotations;
 
+        /// <summary>
+        /// Initializes a new instance of the MACETrain class.
+        /// </summary>
+        /// <param name="numWorkers">Number of workers in the dataset.</param>
+        /// <param name="numItems">Number of items to be annotated.</param>
+        /// <param name="numCategories">Number of possible label categories.</param>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when any parameter is non-positive.</exception>
         public MACETrain(int numWorkers, int numItems, int numCategories)
         {
-            A = Variable.Array(Variable.Array<int>(m), n);
+            if (numWorkers <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(numWorkers), "Number of workers must be positive.");
+            }
 
-            this.numWorkers.ObservedValue = numWorkers;
-            this.numItems.ObservedValue = numItems;
-            this.numCategories.ObservedValue = numCategories;
+            if (numItems <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(numItems), "Number of items must be positive.");
+            }
+
+            if (numCategories <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
+            }
+
+            _annotations = Variable.Array(Variable.Array<int>(_workerRange), _itemRange);
+
+            _numWorkers.ObservedValue = numWorkers;
+            _numItems.ObservedValue = numItems;
+            _numCategories.ObservedValue = numCategories;
         }
 
+        /// <summary>
+        /// Creates the complete MACE probabilistic model including the observation model.
+        /// </summary>
         public override void CreateModel()
         {
             base.CreateModel();
 
-            using (Variable.ForEach(n))
+            using (Variable.ForEach(_itemRange))
             {
-                T[n] = Variable.DiscreteUniform(numCategories);
-                using (Variable.ForEach(m))
+                // True label for this item (uniform prior over categories)
+                _trueLabels[_itemRange] = Variable.DiscreteUniform(_numCategories);
+                
+                using (Variable.ForEach(_workerRange))
                 {
-                    S[n][m] = Variable.Bernoulli(theta[m]);
-                    using (Variable.If(A[n][m] > -1))               // loop over observed data only
+                    // Spammer indicator for this worker-item pair
+                    _spammerIndicators[_itemRange][_workerRange] = Variable.Bernoulli(_theta[_workerRange]);
+                    
+                    // Only process observed annotations (skip missing data marked with -1)
+                    using (Variable.If(_annotations[_itemRange][_workerRange] > -1))
                     {
-                        using (Variable.If(S[n][m] == false))
-                            A[n][m] = T[n];                         // not spammer: assign true label
-                        using (Variable.If(S[n][m] == true))
-                            A[n][m] = Variable.Discrete(phi[m]);   // spammer: assign label according to his profile
+                        using (Variable.If(_spammerIndicators[_itemRange][_workerRange] == false))
+                        {
+                            // Not a spammer: assign the true label
+                            _annotations[_itemRange][_workerRange] = _trueLabels[_itemRange];
+                        }
+                        
+                        using (Variable.If(_spammerIndicators[_itemRange][_workerRange] == true))
+                        {
+                            // Spammer: assign label according to their preference distribution
+                            _annotations[_itemRange][_workerRange] = Variable.Discrete(_phi[_workerRange]);
+                        }
                     }
                 }
             }
 
-            // prevent engine from trying to infer "A"
-            // "A" can contain negative values that are out of domain
-            A.AddAttribute(new DoNotInfer());
+            // Prevent the inference engine from trying to infer the observed annotations
+            // The annotations matrix can contain -1 values which are out of the domain
+            _annotations.AddAttribute(new DoNotInfer());
         }
 
+        /// <summary>
+        /// Performs probabilistic inference to estimate the posterior distributions of all model parameters.
+        /// </summary>
+        /// <param name="data">The annotation data matrix where data[item][worker] gives the annotation or -1 for missing.</param>
+        /// <returns>ModelData containing the posterior distributions for all model parameters.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when data is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when data dimensions don't match the expected dimensions.</exception>
         public ModelData InferModelData(int[][] data)
         {
-            // !!! data dimensions must match numWorkers x numItems every call!!!
-            ModelData posteriors = new ModelData();
+            if (data == null)
+            {
+                throw new ArgumentNullException(nameof(data));
+            }
 
-            A.ObservedValue = data;
+            // Validate data dimensions
+            if (data.Length != _numItems.ObservedValue)
+            {
+                throw new ArgumentException(
+                    $"Data has {data.Length} items but model expects {_numItems.ObservedValue} items.", 
+                    nameof(data));
+            }
 
-            posteriors.thetaDist = InferenceEngine.Infer<Beta[]>(theta);
-            posteriors.phiDist = InferenceEngine.Infer<Dirichlet[]>(phi);
+            for (int i = 0; i < data.Length; i++)
+            {
+                if (data[i] == null || data[i].Length != _numWorkers.ObservedValue)
+                {
+                    throw new ArgumentException(
+                        $"Data row {i} has {data[i]?.Length ?? 0} workers but model expects {_numWorkers.ObservedValue} workers.", 
+                        nameof(data));
+                }
+            }
 
-            posteriors.TDist = InferenceEngine.Infer<Discrete[]>(T);
-            posteriors.SDist = InferenceEngine.Infer<Bernoulli[][]>(S);
+            var posteriors = new ModelData();
+
+            // Set the observed annotation data
+            _annotations.ObservedValue = data;
+
+            // Perform inference to get posterior distributions
+            posteriors.ThetaDist = InferenceEngine.Infer<Beta[]>(_theta);
+            posteriors.PhiDist = InferenceEngine.Infer<Dirichlet[]>(_phi);
+            posteriors.TDist = InferenceEngine.Infer<Discrete[]>(_trueLabels);
+            posteriors.SDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators);
 
             return posteriors;
         }
