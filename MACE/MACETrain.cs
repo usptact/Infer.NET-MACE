@@ -17,40 +17,38 @@ namespace MACE
         protected VariableArray<VariableArray<int>, int[][]> _annotations;
 
         /// <summary>
-        /// Initializes a new instance of the MACETrain class.
+        /// Initializes a new instance of the MACETrain class and builds the probabilistic model.
         /// </summary>
         /// <param name="numWorkers">Number of workers in the dataset.</param>
         /// <param name="numItems">Number of items to be annotated.</param>
         /// <param name="numCategories">Number of possible label categories.</param>
+        /// <param name="iterations">Number of VMP inference iterations (default: 50).</param>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when any parameter is non-positive.</exception>
-        public MACETrain(int numWorkers, int numItems, int numCategories)
+        public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50)
         {
             if (numWorkers <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(numWorkers), "Number of workers must be positive.");
-            }
-
             if (numItems <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(numItems), "Number of items must be positive.");
-            }
-
             if (numCategories <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
-            }
+            if (iterations <= 0)
+                throw new ArgumentOutOfRangeException(nameof(iterations), "Number of iterations must be positive.");
 
             _annotations = Variable.Array(Variable.Array<int>(_workerRange), _itemRange);
 
             _numWorkers.ObservedValue = numWorkers;
             _numItems.ObservedValue = numItems;
             _numCategories.ObservedValue = numCategories;
+
+            CreateModel();
+            InferenceEngine.NumberOfIterations = iterations;
         }
 
         /// <summary>
         /// Creates the complete MACE probabilistic model including the observation model.
         /// </summary>
-        public override void CreateModel()
+        protected override void CreateModel()
         {
             base.CreateModel();
 
@@ -88,49 +86,44 @@ namespace MACE
         }
 
         /// <summary>
-        /// Performs probabilistic inference to estimate the posterior distributions of all model parameters.
+        /// Runs VMP inference and returns posterior distributions for all model parameters.
         /// </summary>
-        /// <param name="data">The annotation data matrix where data[item][worker] gives the annotation or -1 for missing.</param>
+        /// <param name="data">Annotation matrix where data[item][worker] is the label or -1 for missing.</param>
+        /// <param name="priors">Prior distributions for worker parameters (theta and phi).</param>
         /// <returns>ModelData containing the posterior distributions for all model parameters.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when data is null.</exception>
-        /// <exception cref="ArgumentException">Thrown when data dimensions don't match the expected dimensions.</exception>
-        public ModelData InferModelData(int[][] data)
+        /// <exception cref="ArgumentNullException">Thrown when data or priors is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when data dimensions don't match the model.</exception>
+        public ModelData InferModelData(int[][] data, ModelData priors)
         {
             if (data == null)
-            {
                 throw new ArgumentNullException(nameof(data));
-            }
+            if (priors == null)
+                throw new ArgumentNullException(nameof(priors));
 
-            // Validate data dimensions
             if (data.Length != _numItems.ObservedValue)
-            {
                 throw new ArgumentException(
-                    $"Data has {data.Length} items but model expects {_numItems.ObservedValue} items.", 
+                    $"Data has {data.Length} items but model expects {_numItems.ObservedValue} items.",
                     nameof(data));
-            }
 
             for (int i = 0; i < data.Length; i++)
             {
                 if (data[i] == null || data[i].Length != _numWorkers.ObservedValue)
-                {
                     throw new ArgumentException(
-                        $"Data row {i} has {data[i]?.Length ?? 0} workers but model expects {_numWorkers.ObservedValue} workers.", 
+                        $"Data row {i} has {data[i]?.Length ?? 0} workers but model expects {_numWorkers.ObservedValue} workers.",
                         nameof(data));
-                }
             }
 
-            var posteriors = new ModelData();
-
-            // Set the observed annotation data
+            InitializeLabels(_numItems.ObservedValue, _numCategories.ObservedValue);
+            SetModelData(priors);
             _annotations.ObservedValue = data;
 
-            // Perform inference to get posterior distributions
-            posteriors.ThetaDist = InferenceEngine.Infer<Beta[]>(_theta);
-            posteriors.PhiDist = InferenceEngine.Infer<Dirichlet[]>(_phi);
-            posteriors.TDist = InferenceEngine.Infer<Discrete[]>(_trueLabels);
-            posteriors.SDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators);
-
-            return posteriors;
+            return new ModelData
+            {
+                ThetaDist = InferenceEngine.Infer<Beta[]>(_theta),
+                PhiDist = InferenceEngine.Infer<Dirichlet[]>(_phi),
+                TDist = InferenceEngine.Infer<Discrete[]>(_trueLabels),
+                SDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators)
+            };
         }
     }
 }

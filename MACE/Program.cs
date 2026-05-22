@@ -116,15 +116,11 @@ namespace MACE
                 var initPriors = InitializePriors(numWorkers, numCategories);
 
                 // Create and train the MACE model
-                Console.WriteLine("Creating probabilistic model...");
-                var trainer = new MACETrain(numWorkers, numItems, numCategories);
-                trainer.CreateModel();
-                trainer.InferenceEngine.NumberOfIterations = iterations;
-                trainer.InitializeLabels(numItems, numCategories);
-                trainer.SetModelData(initPriors);
+                Console.WriteLine($"Creating probabilistic model...");
+                var trainer = new MACETrain(numWorkers, numItems, numCategories, iterations);
 
                 Console.WriteLine($"Running probabilistic inference ({iterations} iterations)...");
-                var posterior = trainer.InferModelData(data);
+                var posterior = trainer.InferModelData(data, initPriors);
 
                 // Write results to CSV files
                 Console.WriteLine("Writing results to CSV files...");

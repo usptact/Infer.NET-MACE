@@ -38,7 +38,7 @@ This project follows modern C# conventions:
 The core model lives in `MACEBase` and `MACETrain`. If you modify it:
 
 - Verify that inference still converges on `sample_data.txt` and produces qualitatively correct results (Worker 7 identified as spammer, uncertain items flagged)
-- Be aware that VMP is sensitive to initialisation — `InitializeLabels` randomises the starting point to break symmetry, so run a few times to confirm stability
+- Be aware that VMP is sensitive to initialisation — label initialisation randomises the starting point to break symmetry, so run a few times to confirm stability
 - If you change the number of inference iterations needed for convergence, update the default in `Program.cs` and the README
 
 ### Input Validation

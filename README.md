@@ -389,16 +389,7 @@ using var reader = new CsvReader("annotations.csv");
 reader.Read();
 var data = reader.GetData();
 
-var trainer = new MACETrain(
-    reader.GetNumWorkers(),
-    reader.GetNumItems(),
-    reader.GetNumCategories()
-);
-
-trainer.CreateModel();
-trainer.InitializeLabels(reader.GetNumItems(), reader.GetNumCategories());
-
-var initPriors = new ModelData
+var priors = new ModelData
 {
     ThetaDist = Enumerable.Range(0, reader.GetNumWorkers())
         .Select(_ => new Beta(1, 1)).ToArray(),
@@ -407,8 +398,14 @@ var initPriors = new ModelData
         .ToArray()
 };
 
-trainer.SetModelData(initPriors);
-var posterior = trainer.InferModelData(data);
+var trainer = new MACETrain(
+    reader.GetNumWorkers(),
+    reader.GetNumItems(),
+    reader.GetNumCategories(),
+    iterations: 50
+);
+
+var posterior = trainer.InferModelData(data, priors);
 
 // Access results
 var itemLabels = posterior.TDist;

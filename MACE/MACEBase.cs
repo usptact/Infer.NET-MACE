@@ -13,7 +13,7 @@ namespace MACE
         /// <summary>
         /// The inference engine used for probabilistic inference.
         /// </summary>
-        public InferenceEngine InferenceEngine { get; protected set; } = null!;
+        protected InferenceEngine InferenceEngine { get; set; } = null!;
 
         // Model dimensions
         protected Variable<int> _numWorkers;
@@ -60,9 +60,9 @@ namespace MACE
 
         /// <summary>
         /// Creates the probabilistic model structure.
-        /// This method should be overridden by derived classes to define the complete model.
+        /// Called once during construction by the concrete subclass after all fields are initialised.
         /// </summary>
-        public virtual void CreateModel()
+        protected virtual void CreateModel()
         {
             // Define the prior distributions for worker parameters
             using (Variable.ForEach(_workerRange))
@@ -83,7 +83,7 @@ namespace MACE
         /// </summary>
         /// <param name="modelData">ModelData containing the prior distributions.</param>
         /// <exception cref="ArgumentNullException">Thrown when modelData is null.</exception>
-        public virtual void SetModelData(ModelData modelData)
+        protected virtual void SetModelData(ModelData modelData)
         {
             if (modelData == null)
             {
@@ -96,12 +96,11 @@ namespace MACE
 
         /// <summary>
         /// Initializes the true labels with random assignments to break symmetry.
-        /// This is important for proper convergence of the inference algorithm.
+        /// Must be called before each inference run to avoid getting stuck in a symmetric fixed point.
         /// </summary>
         /// <param name="numItems">Number of items in the dataset.</param>
         /// <param name="numCategories">Number of possible label categories.</param>
-        /// <exception cref="ArgumentOutOfRangeException">Thrown when numItems or numCategories is non-positive.</exception>
-        public void InitializeLabels(int numItems, int numCategories)
+        protected void InitializeLabels(int numItems, int numCategories)
         {
             if (numItems <= 0)
             {
