@@ -130,11 +130,12 @@ dotnet run --project MACE -- sample_data.txt
 ### Command Line Options
 
 ```bash
-MACE.exe <CSV_FILE>
+MACE.exe <CSV_FILE> [--iterations N]
 ```
 
 **Parameters:**
 - `<CSV_FILE>`: Path to the CSV file containing annotation data
+- `--iterations N`: Number of VMP inference iterations (default: 50). Increase if results seem unstable across runs.
 
 **Output Files:**
 - `<input_name>_item_labels.csv`: Inferred label probabilities for each item
@@ -142,7 +143,7 @@ MACE.exe <CSV_FILE>
 
 **Example:**
 ```bash
-dotnet run --project MACE -- MACE/sample_data.txt
+dotnet run --project MACE -- MACE/sample_data.txt --iterations 100
 ```
 
 This will generate:
@@ -166,6 +167,7 @@ Each subsequent row represents one item to be annotated. Columns correspond to w
 MACE enforces the following data quality requirements:
 
 1. **Minimum Worker Coverage**: Each work item must be seen by at least 3 different workers for reliable inference
+2. **Contiguous Labels**: Labels must form a gap-free integer range starting from 0 (e.g. `{0, 1, 2}`). A gap such as `{0, 2}` is rejected at load time to prevent phantom categories from skewing inference.
 
 ### Validation Process
 
@@ -305,7 +307,7 @@ Number of categories: 3
 
 Initializing MACE model priors...
 Creating probabilistic model...
-Running probabilistic inference...
+Running probabilistic inference (50 iterations)...
 Compiling model...done.
 Iterating:
 .........|.........|.........|.........|.........| 50
@@ -390,18 +392,18 @@ var data = reader.GetData();
 var trainer = new MACETrain(
     reader.GetNumWorkers(),
     reader.GetNumItems(),
-    reader.GetNumCategories() + 1
+    reader.GetNumCategories()
 );
 
 trainer.CreateModel();
-trainer.InitializeLabels(reader.GetNumItems(), reader.GetNumCategories() + 1);
+trainer.InitializeLabels(reader.GetNumItems(), reader.GetNumCategories());
 
 var initPriors = new ModelData
 {
     ThetaDist = Enumerable.Range(0, reader.GetNumWorkers())
         .Select(_ => new Beta(1, 1)).ToArray(),
     PhiDist = Enumerable.Range(0, reader.GetNumWorkers())
-        .Select(_ => new Dirichlet(Enumerable.Repeat(1.0, reader.GetNumCategories() + 1).ToArray()))
+        .Select(_ => new Dirichlet(Enumerable.Repeat(1.0, reader.GetNumCategories()).ToArray()))
         .ToArray()
 };
 
