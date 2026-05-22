@@ -130,12 +130,13 @@ dotnet run --project MACE -- sample_data.txt
 ### Command Line Options
 
 ```bash
-MACE.exe <CSV_FILE> [--iterations N]
+MACE.exe <CSV_FILE> [--iterations N] [--seed N]
 ```
 
 **Parameters:**
 - `<CSV_FILE>`: Path to the CSV file containing annotation data
 - `--iterations N`: Number of VMP inference iterations (default: 50). Increase if results seem unstable across runs.
+- `--seed N`: RNG seed for reproducible results (default: unseeded). Use when you need identical output across runs.
 
 **Output Files:**
 - `<input_name>_item_labels.csv`: Inferred label probabilities for each item
@@ -143,7 +144,7 @@ MACE.exe <CSV_FILE> [--iterations N]
 
 **Example:**
 ```bash
-dotnet run --project MACE -- MACE/sample_data.txt --iterations 100
+dotnet run --project MACE -- MACE/sample_data.txt --iterations 100 --seed 42
 ```
 
 This will generate:
@@ -307,7 +308,7 @@ Number of categories: 3
 
 Initializing MACE model priors...
 Creating probabilistic model...
-Running probabilistic inference (50 iterations)...
+Running probabilistic inference (50 iterations, unseeded)...
 Compiling model...done.
 Iterating:
 .........|.........|.........|.........|.........| 50
@@ -348,7 +349,7 @@ Implements the complete MACE model including the observation model.
 ```csharp
 public class MACETrain : MACEBase
 {
-    public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50);
+    public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50, int? seed = null);
     public ModelPosterior InferModelData(int[][] data, ModelPriors priors);
 }
 ```
@@ -401,7 +402,8 @@ var trainer = new MACETrain(
     reader.GetNumWorkers(),
     reader.GetNumItems(),
     reader.GetNumCategories(),
-    iterations: 50
+    iterations: 50,
+    seed: 42        // omit for unseeded (non-reproducible) runs
 );
 
 var posterior = trainer.InferModelData(data, priors);
