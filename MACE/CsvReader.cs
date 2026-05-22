@@ -122,7 +122,7 @@
                             }
 
                             row[i] = value;
-                            _numCategories = Math.Max(_numCategories, value);
+                            _numCategories = Math.Max(_numCategories, value + 1);
                         }
                     }
 
@@ -135,13 +135,13 @@
                     throw new InvalidOperationException("CSV file contains no data rows.");
                 }
 
-                if (_numCategories < 0)
+                if (_numCategories == 0)
                 {
                     throw new InvalidOperationException("No valid label categories found in the data.");
                 }
 
-                // Validate data quality requirements
                 CheckWorkerCoverage();
+                ValidateLabelRange();
             }
             catch (Exception ex) when (!(ex is InvalidOperationException))
             {
@@ -190,8 +190,8 @@
         public int GetNumItems() => _numItems;
 
         /// <summary>
-        /// Gets the highest category label found in the dataset.
-        /// Note: The actual number of categories is this value + 1 (since labels start from 0).
+        /// Gets the number of distinct label categories in the dataset.
+        /// Labels are expected to be contiguous integers starting from 0, so this equals max(label) + 1.
         /// </summary>
         public int GetNumCategories() => _numCategories;
 
@@ -238,6 +238,38 @@
                 {
                     _validationMessages.Add($"  - Item {item}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// Verifies that every integer in [0, numCategories-1] appears at least once in the data.
+        /// A gap (e.g. labels {0, 2} with no label 1) would silently create a phantom category
+        /// and skew inference, so it is treated as an error.
+        /// </summary>
+        private void ValidateLabelRange()
+        {
+            if (_dataList == null)
+            {
+                return;
+            }
+
+            var observedLabels = new HashSet<int>();
+            foreach (var row in _dataList)
+                foreach (var val in row)
+                    if (val != -1)
+                        observedLabels.Add(val);
+
+            var missingLabels = Enumerable.Range(0, _numCategories)
+                .Where(label => !observedLabels.Contains(label))
+                .ToList();
+
+            if (missingLabels.Count > 0)
+            {
+                var observed = string.Join(", ", observedLabels.OrderBy(x => x));
+                var missing = string.Join(", ", missingLabels);
+                throw new InvalidOperationException(
+                    $"Label(s) {missing} are absent from the data but fall within the expected range [0, {_numCategories - 1}]. " +
+                    $"Labels must form a contiguous range starting from 0. Observed labels: {observed}.");
             }
         }
 

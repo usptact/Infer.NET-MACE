@@ -22,17 +22,38 @@ namespace MACE
             {
                 if (args.Length < 1)
                 {
-                    Console.WriteLine("Usage: MACE.exe <CSV_FILE>");
+                    Console.WriteLine("Usage: MACE.exe <CSV_FILE> [--iterations N]");
                     Console.WriteLine();
-                    Console.WriteLine("Example: MACE.exe sample_data.txt");
+                    Console.WriteLine("  --iterations N   Number of VMP inference iterations (default: 50).");
+                    Console.WriteLine("                   Increase if results seem unstable across runs.");
+                    Console.WriteLine();
+                    Console.WriteLine("Example: MACE.exe sample_data.txt --iterations 100");
                     Console.WriteLine();
                     Console.WriteLine("Output files:");
-                    Console.WriteLine("  - item_labels.csv: Inferred label probabilities for each item");
-                    Console.WriteLine("  - worker_spammer_probs.csv: Spammer probabilities for each worker-item pair");
+                    Console.WriteLine("  - <input>_item_labels.csv: Inferred label probabilities for each item");
+                    Console.WriteLine("  - <input>_worker_spammer_probs.csv: Spammer probabilities for each worker-item pair");
                     return 1;
                 }
 
                 string fileName = args[0];
+                int iterations = 50;
+
+                for (int i = 1; i < args.Length; i++)
+                {
+                    if (args[i] == "--iterations" && i + 1 < args.Length)
+                    {
+                        if (!int.TryParse(args[++i], out iterations) || iterations < 1)
+                        {
+                            Console.WriteLine("ERROR: --iterations must be a positive integer.");
+                            return 1;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"ERROR: Unknown argument '{args[i]}'.");
+                        return 1;
+                    }
+                }
 
                 if (!File.Exists(fileName))
                 {
@@ -63,7 +84,7 @@ namespace MACE
                 var data = reader.GetData();
                 int numWorkers = reader.GetNumWorkers();
                 int numItems = reader.GetNumItems();
-                int numCategories = reader.GetNumCategories() + 1;
+                int numCategories = reader.GetNumCategories();
 
                 Console.WriteLine("*** DATA STATISTICS ***");
                 Console.WriteLine($"Number of items: {numItems}");
@@ -98,10 +119,11 @@ namespace MACE
                 Console.WriteLine("Creating probabilistic model...");
                 var trainer = new MACETrain(numWorkers, numItems, numCategories);
                 trainer.CreateModel();
+                trainer.InferenceEngine.NumberOfIterations = iterations;
                 trainer.InitializeLabels(numItems, numCategories);
                 trainer.SetModelData(initPriors);
 
-                Console.WriteLine("Running probabilistic inference...");
+                Console.WriteLine($"Running probabilistic inference ({iterations} iterations)...");
                 var posterior = trainer.InferModelData(data);
 
                 // Write results to CSV files
@@ -116,6 +138,11 @@ namespace MACE
                 Console.WriteLine($"  - {spammerProbsFile}");
 
                 return 0;
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.WriteLine($"ERROR: {ex.Message}");
+                return 1;
             }
             catch (Exception ex)
             {
