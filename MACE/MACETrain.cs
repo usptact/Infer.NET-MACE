@@ -1,4 +1,5 @@
 using Microsoft.ML.Probabilistic.Distributions;
+using Microsoft.ML.Probabilistic.Math;
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Models.Attributes;
 
@@ -26,6 +27,9 @@ namespace MACE
         // Spammer indicators: _spammerIndicators[item][k] = whether the k-th annotator of item is spamming
         private VariableArray<VariableArray<bool>, bool[][]> _spammerIndicators;
 
+        // Optional RNG seed for reproducible label initialisation
+        private readonly int? _seed;
+
         /// <summary>
         /// Initializes a new instance of the MACETrain class and builds the probabilistic model.
         /// </summary>
@@ -33,8 +37,9 @@ namespace MACE
         /// <param name="numItems">Number of items to be annotated.</param>
         /// <param name="numCategories">Number of possible label categories.</param>
         /// <param name="iterations">Number of VMP inference iterations (default: 50).</param>
+        /// <param name="seed">Optional RNG seed for reproducible label initialisation. When null, results may vary across runs.</param>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when any parameter is non-positive.</exception>
-        public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50)
+        public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50, int? seed = null)
         {
             if (numWorkers <= 0)
                 throw new ArgumentOutOfRangeException(nameof(numWorkers), "Number of workers must be positive.");
@@ -44,6 +49,8 @@ namespace MACE
                 throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
             if (iterations <= 0)
                 throw new ArgumentOutOfRangeException(nameof(iterations), "Number of iterations must be positive.");
+
+            _seed = seed;
 
             _numWorkers.ObservedValue = numWorkers;
             _numItems.ObservedValue = numItems;
@@ -116,6 +123,9 @@ namespace MACE
                 throw new ArgumentException(
                     $"Annotations have {annotations.WorkerIndices.Length} items but model expects {_numItems.ObservedValue}.",
                     nameof(annotations));
+
+            if (_seed.HasValue)
+                Rand.Restart(_seed.Value);
 
             InitializeLabels(_numItems.ObservedValue, _numCategories.ObservedValue);
             SetModelData(priors);

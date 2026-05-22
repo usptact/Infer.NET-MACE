@@ -22,12 +22,13 @@ namespace MACE
             {
                 if (args.Length < 1)
                 {
-                    Console.WriteLine("Usage: MACE.exe <CSV_FILE> [--iterations N]");
+                    Console.WriteLine("Usage: MACE.exe <CSV_FILE> [--iterations N] [--seed N]");
                     Console.WriteLine();
                     Console.WriteLine("  --iterations N   Number of VMP inference iterations (default: 50).");
                     Console.WriteLine("                   Increase if results seem unstable across runs.");
+                    Console.WriteLine("  --seed N         RNG seed for reproducible results (default: unseeded).");
                     Console.WriteLine();
-                    Console.WriteLine("Example: MACE.exe sample_data.txt --iterations 100");
+                    Console.WriteLine("Example: MACE.exe sample_data.txt --iterations 100 --seed 42");
                     Console.WriteLine();
                     Console.WriteLine("Output files:");
                     Console.WriteLine("  - <input>_item_labels.csv: Inferred label probabilities for each item");
@@ -37,6 +38,7 @@ namespace MACE
 
                 string fileName = args[0];
                 int iterations = 50;
+                int? seed = null;
 
                 for (int i = 1; i < args.Length; i++)
                 {
@@ -47,6 +49,15 @@ namespace MACE
                             Console.WriteLine("ERROR: --iterations must be a positive integer.");
                             return 1;
                         }
+                    }
+                    else if (args[i] == "--seed" && i + 1 < args.Length)
+                    {
+                        if (!int.TryParse(args[++i], out int parsedSeed))
+                        {
+                            Console.WriteLine("ERROR: --seed must be an integer.");
+                            return 1;
+                        }
+                        seed = parsedSeed;
                     }
                     else
                     {
@@ -117,9 +128,10 @@ namespace MACE
 
                 // Create and train the MACE model
                 Console.WriteLine($"Creating probabilistic model...");
-                var trainer = new MACETrain(numWorkers, numItems, numCategories, iterations);
+                var trainer = new MACETrain(numWorkers, numItems, numCategories, iterations, seed);
 
-                Console.WriteLine($"Running probabilistic inference ({iterations} iterations)...");
+                string seedInfo = seed.HasValue ? $", seed {seed.Value}" : ", unseeded";
+                Console.WriteLine($"Running probabilistic inference ({iterations} iterations{seedInfo})...");
                 var posterior = trainer.InferModelData(annotations, initPriors);
 
                 // Write results to CSV files
