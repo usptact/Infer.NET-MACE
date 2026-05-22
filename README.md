@@ -166,15 +166,11 @@ Each subsequent row represents one item to be annotated. Columns correspond to w
 MACE enforces the following data quality requirements:
 
 1. **Minimum Worker Coverage**: Each work item must be seen by at least 3 different workers for reliable inference
-2. **No Duplicate Annotations**: Workers cannot provide multiple annotations for the same item
-   - If duplicates are found, only the first occurrence is kept
-   - Duplicate annotations are automatically removed and reported
 
 ### Validation Process
 
 During data loading, MACE automatically:
 - **Checks worker coverage**: Reports items with fewer than 3 workers as warnings
-- **Handles duplicates**: Removes duplicate annotations and reports which duplicates were found
 - **Provides summary**: Shows detailed validation messages in the console output
 
 ### Example
@@ -199,7 +195,6 @@ w1,w2,w3,w4,w5,w6,w7,w8
 - 3 label categories (0, 1, 2)
 - Missing annotations are represented by empty cells
 - Worker 7 appears to be a spammer (always provides label 0)
-- Worker 8 appears to be reliable (provides correct labels)
 
 ## Understanding the Output
 
@@ -234,10 +229,12 @@ Contains the probability that each worker is spamming on each item:
 ```csv
 Item,Worker,Spammer_Probability
 Item_1,Worker_1,0.198094
-Item_1,Worker_2,0.500204
-Item_1,Worker_7,0.733200
-Item_2,Worker_7,0.733200
+Item_1,Worker_4,0.964733
+Item_1,Worker_5,0.288048
+Item_1,Worker_8,0.281414
 ```
+
+Only rows where the worker actually annotated the item are included; missing annotation pairs have no meaningful spammer posterior.
 
 **Columns:**
 - `Item`: Item identifier
@@ -247,7 +244,7 @@ Item_2,Worker_7,0.733200
 **Interpretation:**
 - Values close to 1.0 indicate likely spamming behavior
 - Values close to 0.0 indicate reliable annotation
-- Worker 7 shows consistently high spammer probabilities (0.73+)
+- Worker 7 shows consistently high spammer probabilities (0.69+)
 
 ### Interpretation Guidelines
 
@@ -262,9 +259,8 @@ Item_2,Worker_7,0.733200
 ### Recommended Data Collection
 
 1. **Worker Coverage**: Aim for at least 3-5 workers per item for reliable inference
-2. **Avoid Duplicates**: Ensure each worker annotates each item only once
-3. **Balanced Design**: Try to have roughly equal numbers of annotations per worker
-4. **Quality Control**: Include some gold standard items to validate worker quality
+2. **Balanced Design**: Try to have roughly equal numbers of annotations per worker
+3. **Quality Control**: Include some gold standard items to validate worker quality
 
 ### Common Issues and Solutions
 
@@ -272,11 +268,7 @@ Item_2,Worker_7,0.733200
    - **Problem**: Items with <3 workers have unreliable predictions
    - **Solution**: Collect more annotations for these items or exclude them
 
-2. **Duplicate Annotations**:
-   - **Problem**: Workers providing multiple labels for the same item
-   - **Solution**: MACE automatically handles this by keeping only the first occurrence
-
-3. **Imbalanced Coverage**:
+2. **Imbalanced Coverage**:
    - **Problem**: Some workers annotate many items, others few
    - **Solution**: This is acceptable, but consider worker reliability scores
 
@@ -285,7 +277,6 @@ Item_2,Worker_7,0.733200
 MACE provides detailed validation messages to help you understand data quality:
 
 - **WARNING**: Items with insufficient worker coverage
-- **INFO**: Duplicate annotations that were automatically handled
 - **Statistics**: Summary of data dimensions and coverage
 
 ## Example
@@ -312,21 +303,12 @@ Number of items: 10
 Number of workers: 8
 Number of categories: 3
 
-*** DATA QUALITY VALIDATION ***
-INFO: Found 16 duplicate annotations (kept first occurrence):
-  - Item 1: Workers 5, 8 had duplicate annotations (kept first occurrence)
-  - Item 3: Workers 2, 8 had duplicate annotations (kept first occurrence)
-  - Item 4: Workers 4, 8 had duplicate annotations (kept first occurrence)
-  - Item 5: Workers 5, 6 had duplicate annotations (kept first occurrence)
-  - Item 6: Workers 4 had duplicate annotations (kept first occurrence)
-  - Item 7: Workers 2, 7 had duplicate annotations (kept first occurrence)
-  - Item 8: Workers 6, 7 had duplicate annotations (kept first occurrence)
-  - Item 9: Workers 3 had duplicate annotations (kept first occurrence)
-  - Item 10: Workers 3, 6 had duplicate annotations (kept first occurrence)
-
 Initializing MACE model priors...
 Creating probabilistic model...
 Running probabilistic inference...
+Compiling model...done.
+Iterating:
+.........|.........|.........|.........|.........| 50
 Writing results to CSV files...
 
 *** INFERENCE COMPLETED SUCCESSFULLY ***
@@ -337,9 +319,9 @@ Results written to:
 
 **Analysis:**
 - Items 1, 3, 4, 5, 6, 7, 10 have confident predictions (high confidence values)
-- Item 2 is genuinely difficult (low confidence, high uncertainty)
-- Worker 7 is correctly identified as a spammer (high spammer probabilities)
-- Worker 8 is correctly identified as reliable (low spammer probabilities)
+- Item 2 is genuinely difficult (low confidence across all three labels)
+- Worker 7 is correctly identified as a spammer (spammer probabilities of 0.69–0.99)
+- Worker 8 has mixed reliability — low spammer probability on most items but elevated on Item 2, reflecting genuine uncertainty in that item's label
 
 ## API Documentation
 

@@ -107,7 +107,7 @@ namespace MACE
                 // Write results to CSV files
                 Console.WriteLine("Writing results to CSV files...");
                 WriteItemLabelsToCsv(posterior, numItems, numCategories, itemLabelsFile);
-                WriteSpammerProbabilitiesToCsv(posterior, numItems, numWorkers, spammerProbsFile);
+                WriteSpammerProbabilitiesToCsv(posterior, data, spammerProbsFile);
 
                 Console.WriteLine();
                 Console.WriteLine("*** INFERENCE COMPLETED SUCCESSFULLY ***");
@@ -221,36 +221,29 @@ namespace MACE
 
         /// <summary>
         /// Writes the worker spammer probabilities to a CSV file.
+        /// Only rows where the worker actually annotated the item are written;
+        /// missing annotation pairs have no meaningful spammer posterior.
         /// </summary>
         /// <param name="posterior">Posterior distributions from MACE inference.</param>
-        /// <param name="numItems">Number of items in the dataset.</param>
-        /// <param name="numWorkers">Number of workers in the dataset.</param>
+        /// <param name="data">Raw annotation matrix; data[item][worker] == -1 means missing.</param>
         /// <param name="outputFile">Path to the output CSV file.</param>
-        private static void WriteSpammerProbabilitiesToCsv(ModelData posterior, int numItems, int numWorkers, string outputFile)
+        private static void WriteSpammerProbabilitiesToCsv(ModelData posterior, int[][] data, string outputFile)
         {
             try
             {
                 using var writer = new StreamWriter(outputFile);
-                
-                // Write header
-                var headerColumns = new List<string> { "Item", "Worker", "Spammer_Probability" };
-                writer.WriteLine(string.Join(",", headerColumns));
 
-                // Write data rows
-                for (int item = 0; item < numItems; item++)
+                writer.WriteLine("Item,Worker,Spammer_Probability");
+
+                for (int item = 0; item < data.Length; item++)
                 {
-                    for (int worker = 0; worker < numWorkers; worker++)
+                    for (int worker = 0; worker < data[item].Length; worker++)
                     {
+                        if (data[item][worker] == -1)
+                            continue;
+
                         var spamProb = posterior.SDist[item][worker].GetProbTrue();
-                        
-                        var row = new List<string>
-                        {
-                            $"Item_{item + 1}",
-                            $"Worker_{worker + 1}",
-                            $"{spamProb:F6}"
-                        };
-                        
-                        writer.WriteLine(string.Join(",", row));
+                        writer.WriteLine($"Item_{item + 1},Worker_{worker + 1},{spamProb:F6}");
                     }
                 }
             }

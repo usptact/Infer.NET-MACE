@@ -141,7 +141,7 @@
                 }
 
                 // Validate data quality requirements
-                ValidateDataQuality();
+                CheckWorkerCoverage();
             }
             catch (Exception ex) when (!(ex is InvalidOperationException))
             {
@@ -201,11 +201,10 @@
         public IReadOnlyList<string> GetValidationMessages() => _validationMessages;
 
         /// <summary>
-        /// Validates data quality requirements:
-        /// - Each work item must be seen by at least 3 different workers
-        /// - Workers cannot see the same work item more than once (duplicates are handled)
+        /// Checks that each item has been annotated by at least 3 workers and emits
+        /// a warning for any that fall below that threshold.
         /// </summary>
-        private void ValidateDataQuality()
+        private void CheckWorkerCoverage()
         {
             if (_dataList == null)
             {
@@ -214,7 +213,6 @@
 
             _validationMessages.Clear();
 
-            // Check each item has at least 3 workers
             var itemsWithInsufficientWorkers = new List<int>();
             for (int item = 0; item < _numItems; item++)
             {
@@ -240,66 +238,6 @@
                 {
                     _validationMessages.Add($"  - Item {item}");
                 }
-            }
-
-            // Check for and handle duplicate annotations
-            HandleDuplicateAnnotations();
-        }
-
-        /// <summary>
-        /// Handles duplicate annotations by keeping only the first occurrence.
-        /// 
-        /// Note: This method assumes that each column represents a different worker.
-        /// If the same worker appears in multiple columns for the same item,
-        /// only the first column (leftmost) annotation is kept.
-        /// </summary>
-        private void HandleDuplicateAnnotations()
-        {
-            if (_dataList == null)
-            {
-                return;
-            }
-
-            var duplicateCount = 0;
-            var duplicateDetails = new List<string>();
-
-            // For each item, check if any worker has multiple annotations
-            // (This happens when the same worker ID appears in multiple columns)
-            for (int item = 0; item < _numItems; item++)
-            {
-                var workerAnnotations = new Dictionary<int, int>(); // annotation value -> first occurrence column
-                var duplicatesInItem = new List<int>();
-
-                for (int worker = 0; worker < _numWorkers; worker++)
-                {
-                    if (_dataList[item][worker] != -1)
-                    {
-                        int annotationValue = _dataList[item][worker];
-                        if (workerAnnotations.ContainsKey(annotationValue))
-                        {
-                            // This is a duplicate annotation - mark as missing
-                            _dataList[item][worker] = -1;
-                            duplicatesInItem.Add(worker + 1);
-                            duplicateCount++;
-                        }
-                        else
-                        {
-                            // First occurrence - record it
-                            workerAnnotations[annotationValue] = worker;
-                        }
-                    }
-                }
-
-                if (duplicatesInItem.Count > 0)
-                {
-                    duplicateDetails.Add($"  - Item {item + 1}: Workers {string.Join(", ", duplicatesInItem)} had duplicate annotations (kept first occurrence)");
-                }
-            }
-
-            if (duplicateCount > 0)
-            {
-                _validationMessages.Add($"INFO: Found {duplicateCount} duplicate annotations (kept first occurrence):");
-                _validationMessages.AddRange(duplicateDetails);
             }
         }
 
