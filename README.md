@@ -417,26 +417,7 @@ var spammerProbs = posterior.SDist;
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests if applicable
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-### Code Style
-
-This project follows modern C# conventions:
-- Use nullable reference types
-- Prefer `var` for local variables
-- Use expression-bodied members where appropriate
-- Include XML documentation for public APIs
-- Follow the existing naming conventions
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, model change guidelines, and how to submit a pull request.
 
 ## References
 
