@@ -81,7 +81,7 @@ namespace MACE
                 using var reader = new CsvReader(fileName);
                 reader.Read();
                 
-                var data = reader.GetData();
+                var annotations = reader.GetSparseData();
                 int numWorkers = reader.GetNumWorkers();
                 int numItems = reader.GetNumItems();
                 int numCategories = reader.GetNumCategories();
@@ -120,12 +120,12 @@ namespace MACE
                 var trainer = new MACETrain(numWorkers, numItems, numCategories, iterations);
 
                 Console.WriteLine($"Running probabilistic inference ({iterations} iterations)...");
-                var posterior = trainer.InferModelData(data, initPriors);
+                var posterior = trainer.InferModelData(annotations, initPriors);
 
                 // Write results to CSV files
                 Console.WriteLine("Writing results to CSV files...");
                 WriteItemLabelsToCsv(posterior, numItems, numCategories, itemLabelsFile);
-                WriteSpammerProbabilitiesToCsv(posterior, data, spammerProbsFile);
+                WriteSpammerProbabilitiesToCsv(posterior, annotations, spammerProbsFile);
 
                 Console.WriteLine();
                 Console.WriteLine("*** INFERENCE COMPLETED SUCCESSFULLY ***");
@@ -225,13 +225,12 @@ namespace MACE
 
         /// <summary>
         /// Writes the worker spammer probabilities to a CSV file.
-        /// Only rows where the worker actually annotated the item are written;
-        /// missing annotation pairs have no meaningful spammer posterior.
+        /// SDist[item][k] is parallel to annotations.WorkerIndices[item][k].
         /// </summary>
         /// <param name="posterior">Posterior distributions from MACE inference.</param>
-        /// <param name="data">Raw annotation matrix; data[item][worker] == -1 means missing.</param>
+        /// <param name="annotations">Sparse annotations used to map k back to a worker index.</param>
         /// <param name="outputFile">Path to the output CSV file.</param>
-        private static void WriteSpammerProbabilitiesToCsv(ModelPosterior posterior, int[][] data, string outputFile)
+        private static void WriteSpammerProbabilitiesToCsv(ModelPosterior posterior, SparseAnnotations annotations, string outputFile)
         {
             try
             {
@@ -239,15 +238,13 @@ namespace MACE
 
                 writer.WriteLine("Item,Worker,Spammer_Probability");
 
-                for (int item = 0; item < data.Length; item++)
+                for (int item = 0; item < annotations.WorkerIndices.Length; item++)
                 {
-                    for (int worker = 0; worker < data[item].Length; worker++)
+                    for (int k = 0; k < annotations.WorkerIndices[item].Length; k++)
                     {
-                        if (data[item][worker] == -1)
-                            continue;
-
-                        var spamProb = posterior.SDist[item][worker].GetProbTrue();
-                        writer.WriteLine($"Item_{item + 1},Worker_{worker + 1},{spamProb:F6}");
+                        int workerIdx = annotations.WorkerIndices[item][k];
+                        var spamProb = posterior.SDist[item][k].GetProbTrue();
+                        writer.WriteLine($"Item_{item + 1},Worker_{workerIdx + 1},{spamProb:F6}");
                     }
                 }
             }

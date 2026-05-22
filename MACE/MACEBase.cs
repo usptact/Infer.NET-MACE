@@ -22,7 +22,6 @@ namespace MACE
         
         // Data-specific model variables
         protected VariableArray<int> _trueLabels; // T: true labels for each item
-        protected VariableArray<VariableArray<bool>, bool[][]> _spammerIndicators; // S: whether each worker is spamming on each item
 
         // Prior distributions for shared random variables
         protected VariableArray<Beta> _thetaPriors; // Priors for worker spammer probabilities
@@ -49,7 +48,6 @@ namespace MACE
             _workerRange = new Microsoft.ML.Probabilistic.Models.Range(_numWorkers).Named("worker");
 
             _trueLabels = Variable.Array<int>(_itemRange);
-            _spammerIndicators = Variable.Array(Variable.Array<bool>(_workerRange), _itemRange);
 
             _thetaPriors = Variable.Array<Beta>(_workerRange).Named("thetaPrior");
             _phiPriors = Variable.Array<Dirichlet>(_workerRange).Named("phiPrior");

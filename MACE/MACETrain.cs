@@ -1,4 +1,4 @@
-﻿using Microsoft.ML.Probabilistic.Distributions;
+using Microsoft.ML.Probabilistic.Distributions;
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Models.Attributes;
 
@@ -6,15 +6,25 @@ namespace MACE
 {
     /// <summary>
     /// Implements the MACE (Multi-Annotator Competence Estimation) model for crowdsourcing annotation quality estimation.
-    /// This class extends MACEBase to define the complete probabilistic model including the observation model.
+    /// Uses a sparse jagged representation — only observed (item, worker, label) triples are stored,
+    /// so memory and per-iteration cost scale with the number of annotations rather than the full item×worker matrix.
     /// </summary>
     public class MACETrain : MACEBase
     {
-        /// <summary>
-        /// Worker-item annotation matrix containing the observed votes (partially observed).
-        /// A[item][worker] contains the annotation for that item-worker pair, or -1 for missing annotations.
-        /// </summary>
-        protected VariableArray<VariableArray<int>, int[][]> _annotations;
+        // Number of observed annotations per item (varies per item)
+        private VariableArray<int> _numObsPerItem;
+
+        // Jagged range: obsRange[item] covers only the workers who annotated that item
+        private Microsoft.ML.Probabilistic.Models.Range _obsRange;
+
+        // Observed worker indices: _observedWorkerIndices[item][k] = worker index for k-th annotation of item
+        private VariableArray<VariableArray<int>, int[][]> _observedWorkerIndices;
+
+        // Observed labels: _observedLabels[item][k] = label given by _observedWorkerIndices[item][k]
+        private VariableArray<VariableArray<int>, int[][]> _observedLabels;
+
+        // Spammer indicators: _spammerIndicators[item][k] = whether the k-th annotator of item is spamming
+        private VariableArray<VariableArray<bool>, bool[][]> _spammerIndicators;
 
         /// <summary>
         /// Initializes a new instance of the MACETrain class and builds the probabilistic model.
@@ -35,18 +45,24 @@ namespace MACE
             if (iterations <= 0)
                 throw new ArgumentOutOfRangeException(nameof(iterations), "Number of iterations must be positive.");
 
-            _annotations = Variable.Array(Variable.Array<int>(_workerRange), _itemRange);
-
             _numWorkers.ObservedValue = numWorkers;
             _numItems.ObservedValue = numItems;
             _numCategories.ObservedValue = numCategories;
+
+            _numObsPerItem = Variable.Array<int>(_itemRange).Named("numObs");
+            _obsRange = new Microsoft.ML.Probabilistic.Models.Range(_numObsPerItem[_itemRange]).Named("obs");
+
+            _observedWorkerIndices = Variable.Array(Variable.Array<int>(_obsRange), _itemRange).Named("workerIdx");
+            _observedLabels = Variable.Array(Variable.Array<int>(_obsRange), _itemRange).Named("label");
+            _spammerIndicators = Variable.Array(Variable.Array<bool>(_obsRange), _itemRange).Named("S");
 
             CreateModel();
             InferenceEngine.NumberOfIterations = iterations;
         }
 
         /// <summary>
-        /// Creates the complete MACE probabilistic model including the observation model.
+        /// Creates the complete MACE probabilistic model using a sparse jagged representation.
+        /// The inner loop runs only over observed (item, worker) pairs — no sentinel values needed.
         /// </summary>
         protected override void CreateModel()
         {
@@ -54,70 +70,59 @@ namespace MACE
 
             using (Variable.ForEach(_itemRange))
             {
-                // True label for this item (uniform prior over categories)
                 _trueLabels[_itemRange] = Variable.DiscreteUniform(_numCategories);
-                
-                using (Variable.ForEach(_workerRange))
+
+                using (Variable.ForEach(_obsRange))
                 {
-                    // Spammer indicator for this worker-item pair
-                    _spammerIndicators[_itemRange][_workerRange] = Variable.Bernoulli(_theta[_workerRange]);
-                    
-                    // Only process observed annotations (skip missing data marked with -1)
-                    using (Variable.If(_annotations[_itemRange][_workerRange] > -1))
+                    var workerIdx = _observedWorkerIndices[_itemRange][_obsRange];
+
+                    _spammerIndicators[_itemRange][_obsRange] = Variable.Bernoulli(_theta[workerIdx]);
+
+                    using (Variable.If(_spammerIndicators[_itemRange][_obsRange] == false))
                     {
-                        using (Variable.If(_spammerIndicators[_itemRange][_workerRange] == false))
-                        {
-                            // Not a spammer: assign the true label
-                            _annotations[_itemRange][_workerRange] = _trueLabels[_itemRange];
-                        }
-                        
-                        using (Variable.If(_spammerIndicators[_itemRange][_workerRange] == true))
-                        {
-                            // Spammer: assign label according to their preference distribution
-                            _annotations[_itemRange][_workerRange] = Variable.Discrete(_phi[_workerRange]);
-                        }
+                        _observedLabels[_itemRange][_obsRange] = _trueLabels[_itemRange];
+                    }
+
+                    using (Variable.If(_spammerIndicators[_itemRange][_obsRange] == true))
+                    {
+                        _observedLabels[_itemRange][_obsRange] = Variable.Discrete(_phi[workerIdx]);
                     }
                 }
             }
 
-            // Prevent the inference engine from trying to infer the observed annotations
-            // The annotations matrix can contain -1 values which are out of the domain
-            _annotations.AddAttribute(new DoNotInfer());
+            _observedLabels.AddAttribute(new DoNotInfer());
+            _observedWorkerIndices.AddAttribute(new DoNotInfer());
         }
 
         /// <summary>
         /// Runs VMP inference and returns posterior distributions for all model parameters.
         /// The returned <see cref="ModelPosterior"/> can be passed directly as priors to a
         /// subsequent call to support incremental/online learning.
+        /// SDist[item][k] is parallel to annotations.WorkerIndices[item][k].
         /// </summary>
-        /// <param name="data">Annotation matrix where data[item][worker] is the label or -1 for missing.</param>
+        /// <param name="annotations">Sparse annotation data from <see cref="CsvReader.GetSparseData"/>.</param>
         /// <param name="priors">Prior distributions for worker parameters (theta and phi).</param>
         /// <returns>Posterior distributions for all model parameters.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when data or priors is null.</exception>
-        /// <exception cref="ArgumentException">Thrown when data dimensions don't match the model.</exception>
-        public ModelPosterior InferModelData(int[][] data, ModelPriors priors)
+        /// <exception cref="ArgumentNullException">Thrown when annotations or priors is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when annotation dimensions don't match the model.</exception>
+        public ModelPosterior InferModelData(SparseAnnotations annotations, ModelPriors priors)
         {
-            if (data == null)
-                throw new ArgumentNullException(nameof(data));
+            if (annotations == null)
+                throw new ArgumentNullException(nameof(annotations));
             if (priors == null)
                 throw new ArgumentNullException(nameof(priors));
 
-            if (data.Length != _numItems.ObservedValue)
+            if (annotations.WorkerIndices.Length != _numItems.ObservedValue)
                 throw new ArgumentException(
-                    $"Data has {data.Length} items but model expects {_numItems.ObservedValue} items.",
-                    nameof(data));
-
-            for (int i = 0; i < data.Length; i++)
-            {
-                if (data[i] == null || data[i].Length != _numWorkers.ObservedValue)
-                    throw new ArgumentException(
-                        $"Data row {i} has {data[i]?.Length ?? 0} workers but model expects {_numWorkers.ObservedValue} workers.",
-                        nameof(data));
-            }
+                    $"Annotations have {annotations.WorkerIndices.Length} items but model expects {_numItems.ObservedValue}.",
+                    nameof(annotations));
 
             InitializeLabels(_numItems.ObservedValue, _numCategories.ObservedValue);
             SetModelData(priors);
-            _annotations.ObservedValue = data;
+
+            _numObsPerItem.ObservedValue = annotations.WorkerIndices.Select(w => w.Length).ToArray();
+            _observedWorkerIndices.ObservedValue = annotations.WorkerIndices;
+            _observedLabels.ObservedValue = annotations.Labels;
 
             return new ModelPosterior(
                 ThetaDist: InferenceEngine.Infer<Beta[]>(_theta),

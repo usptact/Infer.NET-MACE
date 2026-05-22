@@ -1,13 +1,24 @@
 ﻿namespace MACE
 {
     /// <summary>
+    /// Sparse representation of crowdsourcing annotations.
+    /// For each item, only the workers who actually annotated it are stored.
+    /// WorkerIndices[item][k] and Labels[item][k] are parallel arrays.
+    /// </summary>
+    public record SparseAnnotations(
+        /// <summary>WorkerIndices[item][k] — index of the worker who gave the k-th annotation for this item.</summary>
+        int[][] WorkerIndices,
+        /// <summary>Labels[item][k] — label given by WorkerIndices[item][k].</summary>
+        int[][] Labels
+    );
+
+    /// <summary>
     /// Reads and parses CSV files containing crowdsourcing annotation data.
     /// The CSV format expects a header row with worker names, followed by rows of annotation data.
     /// Missing annotations are represented by empty cells.
-    /// 
+    ///
     /// Data Quality Requirements:
     /// - Each work item must be seen by at least 3 different workers
-    /// - Workers cannot see the same work item more than once (duplicates are handled)
     /// </summary>
     public class CsvReader : IDisposable
     {
@@ -152,31 +163,37 @@
         /// <summary>
         /// Returns the parsed data as a two-dimensional array.
         /// </summary>
-        /// <returns>A two-dimensional array where data[item][worker] gives the annotation for that item-worker pair, or -1 for missing annotations.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when Read() has not been called or when no data is available.</exception>
-        public int[][] GetData()
+        /// <returns>A <see cref="SparseAnnotations"/> containing only the observed (item, worker, label) triples.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when Read() has not been called.</exception>
+        public SparseAnnotations GetSparseData()
         {
             if (_disposed)
-            {
                 throw new ObjectDisposedException(nameof(CsvReader));
-            }
-
             if (_dataList == null)
+                throw new InvalidOperationException("Read() must be called before GetSparseData().");
+
+            var workerIndices = new int[_numItems][];
+            var labels = new int[_numItems][];
+
+            for (int item = 0; item < _numItems; item++)
             {
-                throw new InvalidOperationException("Read() must be called before GetData().");
+                var itemWorkers = new List<int>();
+                var itemLabels = new List<int>();
+
+                for (int worker = 0; worker < _numWorkers; worker++)
+                {
+                    if (_dataList[item][worker] != -1)
+                    {
+                        itemWorkers.Add(worker);
+                        itemLabels.Add(_dataList[item][worker]);
+                    }
+                }
+
+                workerIndices[item] = itemWorkers.ToArray();
+                labels[item] = itemLabels.ToArray();
             }
 
-            var data = new int[_numItems][];
-            for (int i = 0; i < _numItems; i++)
-            {
-                data[i] = new int[_numWorkers];
-                int[] item = _dataList[i];
-                for (int j = 0; j < _numWorkers; j++)
-                {
-                    data[i][j] = item[j];
-                }
-            }
-            return data;
+            return new SparseAnnotations(workerIndices, labels);
         }
 
         /// <summary>
