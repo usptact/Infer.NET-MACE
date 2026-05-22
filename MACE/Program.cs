@@ -149,34 +149,15 @@ namespace MACE
         }
 
         /// <summary>
-        /// Initializes the prior distributions for the MACE model.
+        /// Builds uniform prior distributions for the MACE model.
         /// </summary>
-        /// <param name="numWorkers">Number of workers in the dataset.</param>
-        /// <param name="numCategories">Number of label categories.</param>
-        /// <returns>ModelData containing initialized priors.</returns>
-        private static ModelData InitializePriors(int numWorkers, int numCategories)
+        private static ModelPriors InitializePriors(int numWorkers, int numCategories)
         {
-            var initPriors = new ModelData();
-
-            // Beta(1,1) priors for spammer probabilities (theta) - uniform prior
-            var thetaDist = new Beta[numWorkers];
-            for (int i = 0; i < numWorkers; i++)
-            {
-                thetaDist[i] = new Beta(1, 1);
-            }
-
-            // Dirichlet(1,...,1) priors for spammer label preferences (phi) - uniform prior
-            var phiDist = new Dirichlet[numWorkers];
             var uniformConcentration = Enumerable.Repeat(1.0, numCategories).ToArray();
-            for (int i = 0; i < numWorkers; i++)
-            {
-                phiDist[i] = new Dirichlet(uniformConcentration);
-            }
-
-            initPriors.ThetaDist = thetaDist;
-            initPriors.PhiDist = phiDist;
-
-            return initPriors;
+            return new ModelPriors(
+                ThetaDist: Enumerable.Range(0, numWorkers).Select(_ => new Beta(1, 1)).ToArray(),
+                PhiDist: Enumerable.Range(0, numWorkers).Select(_ => new Dirichlet(uniformConcentration)).ToArray()
+            );
         }
 
         /// <summary>
@@ -186,7 +167,7 @@ namespace MACE
         /// <param name="numItems">Number of items in the dataset.</param>
         /// <param name="numCategories">Number of label categories.</param>
         /// <param name="outputFile">Path to the output CSV file.</param>
-        private static void WriteItemLabelsToCsv(ModelData posterior, int numItems, int numCategories, string outputFile)
+        private static void WriteItemLabelsToCsv(ModelPosterior posterior, int numItems, int numCategories, string outputFile)
         {
             try
             {
@@ -250,7 +231,7 @@ namespace MACE
         /// <param name="posterior">Posterior distributions from MACE inference.</param>
         /// <param name="data">Raw annotation matrix; data[item][worker] == -1 means missing.</param>
         /// <param name="outputFile">Path to the output CSV file.</param>
-        private static void WriteSpammerProbabilitiesToCsv(ModelData posterior, int[][] data, string outputFile)
+        private static void WriteSpammerProbabilitiesToCsv(ModelPosterior posterior, int[][] data, string outputFile)
         {
             try
             {

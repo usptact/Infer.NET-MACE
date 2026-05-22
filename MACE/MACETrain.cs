@@ -87,13 +87,15 @@ namespace MACE
 
         /// <summary>
         /// Runs VMP inference and returns posterior distributions for all model parameters.
+        /// The returned <see cref="ModelPosterior"/> can be passed directly as priors to a
+        /// subsequent call to support incremental/online learning.
         /// </summary>
         /// <param name="data">Annotation matrix where data[item][worker] is the label or -1 for missing.</param>
         /// <param name="priors">Prior distributions for worker parameters (theta and phi).</param>
-        /// <returns>ModelData containing the posterior distributions for all model parameters.</returns>
+        /// <returns>Posterior distributions for all model parameters.</returns>
         /// <exception cref="ArgumentNullException">Thrown when data or priors is null.</exception>
         /// <exception cref="ArgumentException">Thrown when data dimensions don't match the model.</exception>
-        public ModelData InferModelData(int[][] data, ModelData priors)
+        public ModelPosterior InferModelData(int[][] data, ModelPriors priors)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
@@ -117,13 +119,12 @@ namespace MACE
             SetModelData(priors);
             _annotations.ObservedValue = data;
 
-            return new ModelData
-            {
-                ThetaDist = InferenceEngine.Infer<Beta[]>(_theta),
-                PhiDist = InferenceEngine.Infer<Dirichlet[]>(_phi),
-                TDist = InferenceEngine.Infer<Discrete[]>(_trueLabels),
-                SDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators)
-            };
+            return new ModelPosterior(
+                ThetaDist: InferenceEngine.Infer<Beta[]>(_theta),
+                PhiDist: InferenceEngine.Infer<Dirichlet[]>(_phi),
+                TDist: InferenceEngine.Infer<Discrete[]>(_trueLabels),
+                SDist: InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators)
+            );
         }
     }
 }

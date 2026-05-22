@@ -81,17 +81,15 @@ namespace MACE
         /// <summary>
         /// Sets the prior distributions for the model parameters.
         /// </summary>
-        /// <param name="modelData">ModelData containing the prior distributions.</param>
-        /// <exception cref="ArgumentNullException">Thrown when modelData is null.</exception>
-        protected virtual void SetModelData(ModelData modelData)
+        /// <param name="priors">Prior distributions for worker parameters.</param>
+        /// <exception cref="ArgumentNullException">Thrown when priors is null.</exception>
+        protected virtual void SetModelData(ModelPriors priors)
         {
-            if (modelData == null)
-            {
-                throw new ArgumentNullException(nameof(modelData));
-            }
+            if (priors == null)
+                throw new ArgumentNullException(nameof(priors));
 
-            _thetaPriors.ObservedValue = modelData.ThetaDist;
-            _phiPriors.ObservedValue = modelData.PhiDist;
+            _thetaPriors.ObservedValue = priors.ThetaDist;
+            _phiPriors.ObservedValue = priors.PhiDist;
         }
 
         /// <summary>

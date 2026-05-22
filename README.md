@@ -348,23 +348,23 @@ Implements the complete MACE model including the observation model.
 ```csharp
 public class MACETrain : MACEBase
 {
-    public MACETrain(int numWorkers, int numItems, int numCategories);
-    public override void CreateModel();
-    public ModelData InferModelData(int[][] data);
+    public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50);
+    public ModelPosterior InferModelData(int[][] data, ModelPriors priors);
 }
 ```
 
-#### `ModelData`
-Container for model parameters and posterior distributions.
+#### `ModelPriors` / `ModelPosterior`
+`ModelPriors` carries the worker parameter priors passed into inference. `ModelPosterior` extends it with the inferred item-level distributions returned by inference. Because `ModelPosterior` is a subtype of `ModelPriors`, it can be passed directly back as priors for a subsequent run to support incremental/online learning.
 
 ```csharp
-public class ModelData
-{
-    public Beta[] ThetaDist { get; set; }        // Worker spammer probabilities
-    public Dirichlet[] PhiDist { get; set; }     // Worker label preferences
-    public Discrete[] TDist { get; set; }        // True label distributions
-    public Bernoulli[][] SDist { get; set; }     // Spammer indicators
-}
+public record ModelPriors(Beta[] ThetaDist, Dirichlet[] PhiDist);
+
+public record ModelPosterior(
+    Beta[] ThetaDist,      // Posterior worker spammer probabilities
+    Dirichlet[] PhiDist,   // Posterior worker label preferences
+    Discrete[] TDist,      // Inferred true label distributions per item
+    Bernoulli[][] SDist    // Spammer indicator per (item, worker) pair
+) : ModelPriors(ThetaDist, PhiDist);
 ```
 
 #### `CsvReader`
@@ -389,14 +389,13 @@ using var reader = new CsvReader("annotations.csv");
 reader.Read();
 var data = reader.GetData();
 
-var priors = new ModelData
-{
-    ThetaDist = Enumerable.Range(0, reader.GetNumWorkers())
+var priors = new ModelPriors(
+    ThetaDist: Enumerable.Range(0, reader.GetNumWorkers())
         .Select(_ => new Beta(1, 1)).ToArray(),
-    PhiDist = Enumerable.Range(0, reader.GetNumWorkers())
+    PhiDist: Enumerable.Range(0, reader.GetNumWorkers())
         .Select(_ => new Dirichlet(Enumerable.Repeat(1.0, reader.GetNumCategories()).ToArray()))
         .ToArray()
-};
+);
 
 var trainer = new MACETrain(
     reader.GetNumWorkers(),
