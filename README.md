@@ -1,10 +1,10 @@
 # MACE: Multi-Annotator Competence Estimation
 
-[![.NET](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Infer.NET](https://img.shields.io/badge/Infer.NET-0.4.2402.2904-purple.svg)](https://dotnet.github.io/infer/)
+[![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Infer.NET](https://img.shields.io/badge/Infer.NET-0.4.2504.701-purple.svg)](https://dotnet.github.io/infer/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A modern .NET 8.0 implementation of the MACE (Multi-Annotator Competence Estimation) algorithm using Microsoft's Infer.NET probabilistic programming framework. This implementation is based on the research paper "Learning Whom to Trust with MACE" by Dirk Hovy et al., published at NAACL 2013.
+A modern .NET 10.0 implementation of the MACE (Multi-Annotator Competence Estimation) algorithm using Microsoft's Infer.NET probabilistic programming framework. This implementation is based on the research paper "Learning Whom to Trust with MACE" by Dirk Hovy et al., published at NAACL 2013.
 
 ## Table of Contents
 
@@ -86,8 +86,8 @@ The model uses variational message passing (VMP) for approximate Bayesian infere
 
 ## Features
 
-- ✅ **Modern .NET 8.0**: Built with the latest .NET framework
-- ✅ **Latest Infer.NET**: Uses the most recent version (0.4.2402.2904)
+- ✅ **Modern .NET 10.0**: Built with the latest .NET framework
+- ✅ **Latest Infer.NET**: Uses the most recent version (0.4.2504.701)
 - ✅ **Robust Error Handling**: Comprehensive input validation and error reporting
 - ✅ **XML Documentation**: Fully documented API with IntelliSense support
 - ✅ **Cross-Platform**: Runs on Windows, macOS, and Linux
@@ -96,7 +96,7 @@ The model uses variational message passing (VMP) for approximate Bayesian infere
 
 ## Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
 - Windows, macOS, or Linux
 
 ## Installation
@@ -468,4 +468,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Note**: This is a modernized implementation of the original MACE algorithm. While the core probabilistic model remains the same, the codebase has been updated to use .NET 8.0, the latest Infer.NET framework, and modern C# best practices for improved maintainability, performance, and developer experience.
+**Note**: This is a modernized implementation of the original MACE algorithm. While the core probabilistic model remains the same, the codebase has been updated to use .NET 10.0, the latest Infer.NET framework, and modern C# best practices for improved maintainability, performance, and developer experience.
