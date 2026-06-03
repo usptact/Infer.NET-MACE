@@ -5,16 +5,42 @@ using MACE.Protos;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.Probabilistic.Distributions;
 using Microsoft.ML.Probabilistic.Math;
+using Prometheus;
 
 namespace MACE.Services;
 
 public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
 {
+    // Static: shared across all per-request instances so uptime is from app start, not request start.
+    private static readonly Stopwatch _uptime = Stopwatch.StartNew();
+
+    // Prometheus metrics — static so they are registered once with the global registry.
+    private static readonly Histogram InferDuration = Metrics.CreateHistogram(
+        "mace_infer_duration_seconds",
+        "VMP inference wall-clock time.",
+        new HistogramConfiguration
+        {
+            Buckets = new[] { 0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0 }
+        });
+
+    private static readonly Gauge PoolAvailable = Metrics.CreateGauge(
+        "mace_pool_available",
+        "Number of idle inference pool slots.");
+
+    private static readonly Counter InferRequests = Metrics.CreateCounter(
+        "mace_infer_requests_total",
+        "Total Infer RPC calls by outcome.",
+        new CounterConfiguration { LabelNames = new[] { "status" } });
+
+    private static readonly Counter UpdatePriorsRequests = Metrics.CreateCounter(
+        "mace_update_priors_requests_total",
+        "Total UpdatePriors RPC calls by verdict.",
+        new CounterConfiguration { LabelNames = new[] { "verdict" } });
+
     private readonly InferencePool       _pool;
     private readonly PriorUpdateService  _priorUpdate;
     private readonly InferenceOptions    _opts;
     private readonly ILogger<MaceInferenceGrpcService> _logger;
-    private readonly Stopwatch           _uptime = Stopwatch.StartNew();
 
     public MaceInferenceGrpcService(
         InferencePool pool,
@@ -50,8 +76,9 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         if (numObs < _opts.MinSensorsForInference)
         {
             _logger.LogDebug(
-                "Incident {Id}: only {N} observations, below threshold {Min}; using raw-max fallback.",
+                "Incident {Id}: only {N} observations (< min {Min}); using raw-max fallback.",
                 request.IncidentId, numObs, _opts.MinSensorsForInference);
+            InferRequests.WithLabels("fallback").Inc();
             return BuildFallbackResponse(request, numObs);
         }
 
@@ -66,26 +93,29 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         catch (OperationCanceledException) when (!context.CancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("Pool exhausted while serving incident {Id}.", request.IncidentId);
+            InferRequests.WithLabels("timeout").Inc();
             throw new RpcException(new Status(StatusCode.Unavailable,
                 "Inference pool exhausted — retry after a moment."));
         }
 
-        var sw = Stopwatch.StartNew();
         OnlineInferenceResult result;
+        long elapsedMs;
         using (lease)
+        using (InferDuration.NewTimer())
         {
-            result = lease.Inferencer.InferOnline(
-                request.Annotations.ToArray(),
-                priors,
-                warmStart);
+            var sw = Stopwatch.StartNew();
+            result    = lease.Inferencer.InferOnline(request.Annotations.ToArray(), priors, warmStart);
+            elapsedMs = sw.ElapsedMilliseconds;
         }
-        sw.Stop();
+
+        PoolAvailable.Set(_pool.Available);
+        InferRequests.WithLabels("success").Inc();
 
         _logger.LogDebug(
             "Incident {Id}: threat={Level} conf={Conf:F3} in {Ms}ms.",
-            request.IncidentId, result.ThreatLevel, result.Confidence, sw.ElapsedMilliseconds);
+            request.IncidentId, result.ThreatLevel, result.Confidence, elapsedMs);
 
-        return BuildInferResponse(request, result, numObs, sw.ElapsedMilliseconds);
+        return BuildInferResponse(request, result, numObs, elapsedMs);
     }
 
     // -------------------------------------------------------------------------
@@ -110,16 +140,9 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         var response = new UpdatePriorsResponse();
         foreach (var sensor in request.Sensors)
         {
-            var current = new BetaParameters(
-                sensor.CurrentTheta.Alpha,
-                sensor.CurrentTheta.Beta);
-
+            var current = new BetaParameters(sensor.CurrentTheta.Alpha, sensor.CurrentTheta.Beta);
             var updated = _priorUpdate.UpdateTheta(
-                current,
-                sensor.SpammerProbMean,
-                sensor.Annotation,
-                verdict,
-                lr);
+                current, sensor.SpammerProbMean, sensor.Annotation, verdict, lr);
 
             response.UpdatedThetas.Add(new UpdatedTheta
             {
@@ -129,6 +152,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             });
         }
 
+        UpdatePriorsRequests.WithLabels(request.Verdict.ToLowerInvariant()).Inc();
         return Task.FromResult(response);
     }
 
@@ -139,6 +163,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
     public override Task<HealthResponse> Health(
         HealthRequest request, ServerCallContext context)
     {
+        PoolAvailable.Set(_pool.Available);
         return Task.FromResult(new HealthResponse
         {
             Status        = "healthy",
@@ -166,11 +191,22 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             throw new RpcException(new Status(StatusCode.InvalidArgument,
                 $"phi_priors must have {_opts.NumSensorTypes} elements, got {req.PhiPriors.Count}."));
 
+        foreach (var theta in req.ThetaPriors)
+        {
+            if (theta.Alpha <= 0 || theta.Beta <= 0)
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    $"Beta parameters must be positive; got alpha={theta.Alpha}, beta={theta.Beta}."));
+        }
+
         foreach (var phi in req.PhiPriors)
         {
             if (phi.Pseudocounts.Count != _opts.NumCategories)
                 throw new RpcException(new Status(StatusCode.InvalidArgument,
                     $"Each phi prior must have {_opts.NumCategories} pseudocounts."));
+
+            if (phi.Pseudocounts.Any(c => c <= 0))
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    "Dirichlet pseudocounts must all be positive."));
         }
 
         if (req.WarmStart.Count > 0 && req.WarmStart.Count != _opts.NumCategories)
@@ -196,12 +232,12 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
     {
         var resp = new InferResponse
         {
-            IncidentId     = req.IncidentId,
-            ThreatLevel    = result.ThreatLevel,
-            Confidence     = result.Confidence,
-            Entropy        = result.Entropy,
+            IncidentId      = req.IncidentId,
+            ThreatLevel     = result.ThreatLevel,
+            Confidence      = result.Confidence,
+            Entropy         = result.Entropy,
             NumObservations = numObs,
-            InferenceMs    = ms
+            InferenceMs     = ms
         };
 
         resp.TDist.AddRange(result.TDist.GetProbs().ToArray());
@@ -222,23 +258,24 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         return resp;
     }
 
-    // Fallback when too few sensors observed the incident to run MACE.
-    // Returns the highest observed annotation as threat_level with low confidence.
+    // Fallback when too few sensors are present to run MACE.
+    // Returns the max observed annotation as threat_level with a uniform (maximum-entropy) distribution.
     private InferResponse BuildFallbackResponse(InferRequest req, int numObs)
     {
         int maxAnnotation = req.Annotations.Where(a => a >= 0).DefaultIfEmpty(0).Max();
-        var uniform = Enumerable.Repeat(1.0 / _opts.NumCategories, _opts.NumCategories).ToArray();
+        double uniform    = 1.0 / _opts.NumCategories;
+        double maxEntropy = Math.Log(_opts.NumCategories);
 
         var resp = new InferResponse
         {
             IncidentId      = req.IncidentId,
             ThreatLevel     = maxAnnotation,
-            Confidence      = 1.0 / _opts.NumCategories,
-            Entropy         = Math.Log(_opts.NumCategories),
+            Confidence      = uniform,
+            Entropy         = maxEntropy,
             NumObservations = numObs,
             InferenceMs     = 0
         };
-        resp.TDist.AddRange(uniform);
+        resp.TDist.AddRange(Enumerable.Repeat(uniform, _opts.NumCategories));
         return resp;
     }
 }

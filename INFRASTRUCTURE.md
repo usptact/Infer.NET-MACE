@@ -175,10 +175,27 @@ kubectl scale deployment mace-inference --replicas=4 -n threatsense
 kubectl logs -l app=mace-inference -n threatsense --tail=100 -f
 ```
 
-### Check sensor reliability (live model state)
+### Check inference pod health and pool status
+The MACE inference pod speaks gRPC (H2C), not plain HTTP. Use `grpcurl` or query
+the Prometheus metrics endpoint, which uses a separate HTTP/1.1 listener on port 9090.
+
 ```bash
-kubectl exec -n threatsense deploy/feedback-processor -- \
-  curl -s http://mace-inference:8080/api/v1/model/sensor-reliability | jq .
+# Pool status and uptime via Prometheus metrics
+kubectl exec -n threatsense deploy/mace-inference -- \
+  curl -s http://localhost:9090/metrics | grep -E 'mace_pool|mace_infer'
+
+# Health check via grpcurl (run from any pod that has grpcurl, or use a temp pod)
+kubectl run grpcurl --rm -it --restart=Never \
+  --image=fullstorydev/grpcurl:latest -- \
+  -plaintext mace-inference:8080 mace.MaceInference/Health
+```
+
+Sensor belief state (θ priors) lives in the `sensor_beliefs` table in Postgres,
+not in the stateless inference pod:
+```bash
+kubectl exec -n threatsense sts/postgres -- \
+  psql -U threatsense -c \
+  "SELECT sensor_id, theta_alpha, theta_beta, incidents_seen FROM sensor_beliefs ORDER BY sensor_id;"
 ```
 
 ### Backup NAS data

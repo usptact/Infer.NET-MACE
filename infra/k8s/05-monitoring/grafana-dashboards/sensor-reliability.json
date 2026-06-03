@@ -9,11 +9,13 @@
   "panels": [
     {
       "id": 1,
-      "title": "Sensor Reliability (θ mean = 1 - spammer probability)",
+      "title": "Sensor Reliability (1 − spammer_prob mean)",
+      "description": "Queried from the sensor_beliefs table in Postgres. Refresh interval should match how often the Feedback Processor writes.",
       "type": "bargauge",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
       "targets": [{
-        "expr": "threatsense_sensor_reliability_mean",
+        "rawSql": "SELECT sensor_id, theta_beta / (theta_alpha + theta_beta) AS reliability FROM sensor_beliefs ORDER BY sensor_id",
+        "format": "table",
         "legendFormat": "{{sensor_id}}"
       }],
       "fieldConfig": {
@@ -31,22 +33,12 @@
     },
     {
       "id": 2,
-      "title": "False Alarm Rate by Sensor (30d)",
-      "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
-      "targets": [{
-        "expr": "threatsense_sensor_false_alarm_rate",
-        "legendFormat": "{{sensor_id}}",
-        "instant": true
-      }]
-    },
-    {
-      "id": 3,
       "title": "Incidents Seen per Sensor",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
       "targets": [{
-        "expr": "threatsense_sensor_incidents_seen_total",
+        "rawSql": "SELECT sensor_id, incidents_seen FROM sensor_beliefs ORDER BY sensor_id",
+        "format": "table",
         "legendFormat": "{{sensor_id}}"
       }]
     }

@@ -175,10 +175,13 @@ namespace MACE
             Discrete[]? warmStartArray = warmStart is not null ? new Discrete[] { warmStart } : null;
             InitializeLabels(1, _numCategories.ObservedValue, warmStartArray);
 
-            var posterior = InferModelData(new int[1][] { annotations });
-
-            var tDist = posterior.TDist[0];
-            var sDist = posterior.SDist[0];
+            // Set observed data and run VMP.
+            // Call Infer<> only for the two variables we need (TDist and SDist).
+            // Skipping ThetaDist and PhiDist avoids allocating those arrays; VMP
+            // still runs once and produces valid marginals for all variables.
+            _annotations.ObservedValue = new int[1][] { annotations };
+            var tDist = InferenceEngine.Infer<Discrete[]>(_trueLabels)[0];
+            var sDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators)[0];
             var probs  = tDist.GetProbs();
 
             int    threatLevel = 0;
