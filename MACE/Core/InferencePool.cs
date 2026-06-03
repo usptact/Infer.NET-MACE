@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 
 namespace MACE.Core;
@@ -8,46 +9,60 @@ namespace MACE.Core;
 ///
 /// Infer.NET's InferenceEngine is not thread-safe: Infer&lt;T&gt;(), ObservedValue
 /// assignment, and InitialiseTo() all mutate internal state. Each concurrent
-/// HTTP request must own its instance exclusively.
+/// gRPC call must own its instance exclusively.
 ///
 /// Creating a new MACETrain per request is too expensive because CreateModel()
-/// compiles the Infer.NET factor graph (~1–3 s). The pool pays that cost once
-/// per slot at startup and leases slots to requests.
+/// compiles the Infer.NET factor graph (~1–3 s first slot; subsequent slots
+/// reuse the compiled code and are much faster). The pool pays this cost once
+/// at startup and leases slots to requests.
 /// </summary>
 public sealed class InferencePool : IDisposable
 {
-    private readonly SemaphoreSlim _semaphore;
+    private readonly SemaphoreSlim              _semaphore;
     private readonly ConcurrentQueue<MACETrain> _available;
-    private readonly int _total;
+    private readonly ILogger<InferencePool>     _logger;
+    private readonly int                        _total;
     private bool _disposed;
 
     public InferencePool(IOptions<InferenceOptions> options, ILogger<InferencePool> logger)
     {
-        var opts = options.Value;
+        _logger    = logger;
+        var opts   = options.Value;
         _total     = opts.PoolSize;
         _semaphore = new SemaphoreSlim(_total, _total);
         _available = new ConcurrentQueue<MACETrain>();
 
         logger.LogInformation(
-            "Initialising inference pool ({Size} slots, {Sensors} sensor types, {Cats} categories)...",
+            "Warming up pool: {Size} slot(s) × ({Sensors} sensor types, {Cats} categories)",
             _total, opts.NumSensorTypes, opts.NumCategories);
+
+        var totalSw = Stopwatch.StartNew();
 
         for (int i = 0; i < _total; i++)
         {
-            // Online constructor: numItems is always 1
+            var slotSw = Stopwatch.StartNew();
             var trainer = new MACETrain(opts.NumSensorTypes, opts.NumCategories);
             trainer.CreateModel();
+            slotSw.Stop();
             _available.Enqueue(trainer);
-            logger.LogDebug("Pool slot {Index} ready.", i + 1);
+
+            // The first slot pays the full Infer.NET JIT + Roslyn compilation cost.
+            // Subsequent slots reuse the compiled algorithm code and are much faster.
+            var note = i == 0 ? "  ← includes Infer.NET JIT / Roslyn compilation" : string.Empty;
+            logger.LogInformation("Slot {Slot}/{Total} ready  {Ms}ms{Note}",
+                i + 1, _total, slotSw.ElapsedMilliseconds, note);
         }
 
-        logger.LogInformation("Inference pool ready — {Size} slots available.", _total);
+        totalSw.Stop();
+        logger.LogInformation(
+            "Pool ready: {Available}/{Total} slots  total warmup {TotalMs}ms",
+            _total, _total, totalSw.ElapsedMilliseconds);
     }
 
     /// <summary>
     /// Acquires exclusive ownership of a <see cref="MACETrain"/> instance.
-    /// Blocks if all slots are busy. Dispose the returned <see cref="PooledInference"/>
-    /// to release the slot back to the pool.
+    /// Blocks until a slot is free or the cancellation token fires.
+    /// Dispose the returned <see cref="PooledInference"/> to release the slot.
     /// </summary>
     public async Task<PooledInference> AcquireAsync(CancellationToken ct = default)
     {
@@ -57,7 +72,7 @@ public sealed class InferencePool : IDisposable
         if (_available.TryDequeue(out var trainer))
             return new PooledInference(trainer, this);
 
-        // Invariant violation — should never happen
+        // Invariant violation — semaphore granted but queue empty.
         _semaphore.Release();
         throw new InvalidOperationException("Pool invariant violated: semaphore granted but queue empty.");
     }
@@ -77,13 +92,14 @@ public sealed class InferencePool : IDisposable
         {
             _semaphore.Dispose();
             _disposed = true;
+            _logger.LogInformation("Pool disposed.");
         }
     }
 }
 
 /// <summary>
 /// Scoped lease on a <see cref="MACETrain"/> instance.
-/// Dispose to return the instance to the pool.
+/// Returning it to the pool on Dispose() is deterministic via the using pattern.
 /// </summary>
 public readonly struct PooledInference : IDisposable
 {

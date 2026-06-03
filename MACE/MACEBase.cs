@@ -71,10 +71,21 @@ namespace MACE
                 _phi[_workerRange] = Variable.Random<Vector, Dirichlet>(_phiPriors[_workerRange]);
             }
 
-            // Initialize inference engine if not already done
             if (InferenceEngine == null)
             {
-                InferenceEngine = new InferenceEngine();
+                InferenceEngine = new InferenceEngine
+                {
+                    // Suppress the "Iterating: 1. 2. ..." progress output that
+                    // Infer.NET writes directly to Console.  We are a service;
+                    // all diagnostic output goes through the structured logger.
+                    ShowProgress = false,
+                    ShowTimings  = false
+                };
+
+                // Keep generated C# in memory; do not write to the GeneratedSource/
+                // directory (irrelevant in a container and pollutes the filesystem).
+                InferenceEngine.Compiler.GenerateInMemory = true;
+                InferenceEngine.Compiler.WriteSourceFiles = false;
             }
         }
 

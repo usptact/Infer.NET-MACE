@@ -1,40 +1,122 @@
 using MACE.Core;
 using MACE.Services;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Options;
 using Prometheus;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 
-var builder = WebApplication.CreateBuilder(args);
+// ── Phase 1: bootstrap logger (used while DI container is being built) ────
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .Enrich.With<ShortClassNameEnricher>()
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff} {Level:u3}] [{ShortContext,-30}] {Message:lj}{NewLine}{Exception}")
+    .CreateBootstrapLogger();
 
-builder.Configuration.AddEnvironmentVariables();
+var startLog = Log.ForContext("SourceContext", "Program");
 
-builder.Services.Configure<InferenceOptions>(
-    builder.Configuration.GetSection("Inference"));
-
-// Pool is a singleton — CreateModel() runs once per slot during construction.
-builder.Services.AddSingleton<InferencePool>();
-builder.Services.AddSingleton<PriorUpdateService>();
-
-builder.Services.AddGrpc();
-
-// gRPC requires HTTP/2. In a containerised environment TLS is terminated at the
-// load-balancer level, so we listen on cleartext HTTP/2 (H2C).
-builder.WebHost.ConfigureKestrel(o =>
+try
 {
-    o.ListenAnyIP(8080, lo => lo.Protocols = HttpProtocols.Http2);
-});
+    startLog.Information("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    startLog.Information("MACE Inference Service starting");
 
-var app = builder.Build();
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Configuration.AddEnvironmentVariables();
 
-// Force the singleton to construct (and pre-warm the pool) before the first request.
-_ = app.Services.GetRequiredService<InferencePool>();
+    // ── Phase 2: full Serilog config (MinimumLevel read from appsettings) ─────
+    // WriteTo sink is defined here in code so the ShortContext enricher and
+    // output template are always applied regardless of which appsettings file
+    // is active.  MinimumLevel overrides live in appsettings.json /
+    // appsettings.Development.json under the "Serilog" key.
+    builder.Host.UseSerilog((ctx, _, config) => config
+        .ReadFrom.Configuration(ctx.Configuration)
+        .Enrich.FromLogContext()
+        .Enrich.With<ShortClassNameEnricher>()
+        .WriteTo.Console(outputTemplate:
+            "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff} {Level:u3}] [{ShortContext,-30}] {Message:lj}{NewLine}{Exception}"));
 
-app.MapGrpcService<MaceInferenceGrpcService>();
+    // ── DI registrations ──────────────────────────────────────────────────────
+    builder.Services.Configure<InferenceOptions>(builder.Configuration.GetSection("Inference"));
+    builder.Services.AddSingleton<InferencePool>();
+    builder.Services.AddSingleton<PriorUpdateService>();
+    builder.Services.AddGrpc();
 
-// Prometheus metrics endpoint (HTTP/1.1 compatible via the gRPC server's HTTP/2 port
-// when accessed with a standard client — or move to a sidecar if needed).
-app.UseMetricServer(port: 9090);
-app.UseHttpMetrics();
+    // gRPC requires HTTP/2.  TLS is terminated at the load-balancer level in
+    // the Kubernetes deployment, so we listen on cleartext HTTP/2 (H2C).
+    builder.WebHost.ConfigureKestrel(o =>
+        o.ListenAnyIP(8080, lo => lo.Protocols = HttpProtocols.Http2));
 
-app.MapGet("/", () => "MACE Inference Service. Use a gRPC client.");
+    var app = builder.Build();
 
-app.Run();
+    // Log resolved configuration before pool warmup so the values are visible
+    // in the output before the potentially slow CreateModel() calls.
+    var opts = app.Services.GetRequiredService<IOptions<InferenceOptions>>().Value;
+    startLog.Information(
+        "Config  sensors={Sensors}  categories={Categories}  pool={Pool}  " +
+        "min-obs={MinObs}  pool-timeout={TimeoutMs}ms",
+        opts.NumSensorTypes, opts.NumCategories, opts.PoolSize,
+        opts.MinSensorsForInference, opts.PoolAcquireTimeoutMs);
+
+    // Force the singleton to construct now so the pool is fully warm before
+    // the first request arrives (otherwise the first caller pays the cost).
+    _ = app.Services.GetRequiredService<InferencePool>();
+
+    app.MapGrpcService<MaceInferenceGrpcService>();
+
+    // Prometheus: separate HTTP/1.1 listener so standard scrapers work without H2C.
+    app.UseMetricServer(port: 9090);
+    app.UseHttpMetrics();
+
+    app.MapGet("/", () => "MACE Inference Service — use a gRPC client.");
+
+    // ── Lifecycle hooks ───────────────────────────────────────────────────────
+    var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+
+    lifetime.ApplicationStarted.Register(() =>
+    {
+        startLog.Information("gRPC    listening on :8080 (H2C)");
+        startLog.Information("Metrics listening on :9090");
+        startLog.Information("MACE Inference Service ready ✓");
+        startLog.Information("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    });
+
+    lifetime.ApplicationStopping.Register(() =>
+        startLog.Information("MACE Inference Service stopping..."));
+
+    lifetime.ApplicationStopped.Register(() =>
+        startLog.Information("MACE Inference Service stopped."));
+
+    app.Run();
+    return 0;
+}
+catch (Exception ex)
+{
+    startLog.Fatal(ex, "MACE Inference Service terminated unexpectedly.");
+    return 1;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Strips the namespace prefix from SourceContext so log output shows just
+// the class name, e.g. "MaceInferenceGrpcService" instead of
+// "MACE.Services.MaceInferenceGrpcService".
+// ─────────────────────────────────────────────────────────────────────────────
+sealed class ShortClassNameEnricher : ILogEventEnricher
+{
+    public void Enrich(LogEvent logEvent, ILogEventPropertyFactory factory)
+    {
+        var full = logEvent.Properties.TryGetValue("SourceContext", out var prop)
+            ? prop.ToString().Trim('"')
+            : string.Empty;
+
+        var dot       = full.LastIndexOf('.');
+        var shortName = dot >= 0 ? full[(dot + 1)..] : full;
+
+        logEvent.AddOrUpdateProperty(factory.CreateProperty("ShortContext", shortName));
+    }
+}
