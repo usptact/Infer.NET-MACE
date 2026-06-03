@@ -19,7 +19,7 @@ import sys
 import math
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import List, Optional
 
 import grpc
 import grpc.aio
@@ -45,7 +45,7 @@ GRPC_TARGET = os.getenv("MACE_GRPC_TARGET", "localhost:8080")
 # Shared gRPC channel (created once at startup)
 # ---------------------------------------------------------------------------
 
-_channel: grpc.aio.Channel | None = None
+_channel: Optional[grpc.aio.Channel] = None
 
 
 @asynccontextmanager
@@ -89,7 +89,7 @@ class BetaParams(BaseModel):
 
 
 class DirichletParams(BaseModel):
-    pseudocounts: list[float] = Field(
+    pseudocounts: List[float] = Field(
         default=[1.0, 1.0, 1.0, 1.0, 1.0],
         description="Dirichlet concentration parameters, one per threat level"
     )
@@ -97,7 +97,7 @@ class DirichletParams(BaseModel):
 
 class InferRequest(BaseModel):
     incident_id: str = Field("test-001", description="Caller-defined incident identifier")
-    annotations: list[int] = Field(
+    annotations: List[int] = Field(
         ...,
         description=(
             "One entry per sensor type in fixed order. "
@@ -106,13 +106,13 @@ class InferRequest(BaseModel):
         ),
         example=[-1, 2, -1, 3, -1, 0, 1]
     )
-    theta_priors: list[BetaParams] = Field(
+    theta_priors: List[BetaParams] = Field(
         ..., description="Beta prior for each sensor type (indexed by sensor-type order)"
     )
-    phi_priors: list[DirichletParams] = Field(
+    phi_priors: List[DirichletParams] = Field(
         ..., description="Dirichlet prior for each sensor type"
     )
-    warm_start: Optional[list[float]] = Field(
+    warm_start: Optional[List[float]] = Field(
         None,
         description=(
             "t_dist from a previous /infer call on the same incident. "
@@ -130,11 +130,11 @@ class SensorReliabilityItem(BaseModel):
 
 class InferResponse(BaseModel):
     incident_id:        str
-    t_dist:             list[float]
+    t_dist:             List[float]
     threat_level:       int
     confidence:         float
     entropy:            float
-    sensor_reliability: list[SensorReliabilityItem]
+    sensor_reliability: List[SensorReliabilityItem]
     num_observations:   int
     inference_ms:       int
 
@@ -149,7 +149,7 @@ class SensorPriorUpdate(BaseModel):
 class UpdatePriorsRequest(BaseModel):
     verdict:       str   = Field(..., description='"TRUE_ALARM" or "FALSE_ALARM"')
     learning_rate: float = Field(0.5, gt=0, le=1)
-    sensors:       list[SensorPriorUpdate]
+    sensors:       List[SensorPriorUpdate]
 
 
 class UpdatedThetaItem(BaseModel):
@@ -159,7 +159,7 @@ class UpdatedThetaItem(BaseModel):
 
 
 class UpdatePriorsResponse(BaseModel):
-    updated_thetas: list[UpdatedThetaItem]
+    updated_thetas: List[UpdatedThetaItem]
 
 
 class HealthResponse(BaseModel):
