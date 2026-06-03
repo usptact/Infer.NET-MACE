@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package mace;
+
+option csharp_namespace = "MACE.Protos";
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+service MaceInference {
+  // Hot path: run VMP inference for a single active incident.
+  // Priors and annotations arrive per-request; pod is fully stateless.
+  rpc Infer (InferRequest) returns (InferResponse);
+
+  // Cold path: compute updated Beta priors after an operator verdict.
+  // Pure arithmetic — does not use Infer.NET.
+  rpc UpdatePriors (UpdatePriorsRequest) returns (UpdatePriorsResponse);
+
+  // Kubernetes liveness / readiness probe.
+  rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Infer
+// ---------------------------------------------------------------------------
+
+message BetaParams {
+  double alpha = 1;
+  double beta  = 2;
+}
+
+message DirichletParams {
+  repeated double pseudocounts = 1;   // length == NumCategories
+}
+
+message InferRequest {
+  string  incident_id = 1;
+
+  // Discretized sensor assessments for this incident.
+  // Length must equal NumSensorTypes (server config).
+  // -1 = sensor absent / did not observe this incident.
+  repeated int32 annotations = 2;
+
+  // Current θ prior (Beta) for each sensor type, indexed by sensor-type order.
+  repeated BetaParams    theta_priors = 3;
+
+  // Current φ prior (Dirichlet) for each sensor type.
+  repeated DirichletParams phi_priors = 4;
+
+  // Optional warm-start: T[0] posterior probabilities from a previous Infer
+  // call on the same incident. Omit (leave empty) on the first call.
+  // When provided, VMP initialises from this distribution and converges faster.
+  repeated double warm_start = 5;
+}
+
+message SensorReliability {
+  int32  sensor_type_index = 1;
+  int32  annotation        = 2;
+  double spammer_prob      = 3;   // mean of S[0][j] Bernoulli posterior
+  double reliability       = 4;   // 1 - spammer_prob
+}
+
+message InferResponse {
+  string incident_id = 1;
+
+  // Full posterior distribution over threat levels: P(CLEAR..CRITICAL | evidence).
+  // Length == NumCategories.
+  repeated double t_dist = 2;
+
+  int32  threat_level    = 3;   // argmax(t_dist)
+  double confidence      = 4;   // max(t_dist)
+  double entropy         = 5;   // Shannon entropy of t_dist (uncertainty measure)
+
+  // Only sensors that contributed an annotation (annotation != -1).
+  repeated SensorReliability sensor_reliability = 6;
+
+  int32 num_observations = 7;   // count of non-(-1) annotations
+  int64 inference_ms     = 8;   // VMP wall-clock time in milliseconds
+}
+
+// ---------------------------------------------------------------------------
+// UpdatePriors
+// ---------------------------------------------------------------------------
+
+message SensorPriorUpdate {
+  int32     sensor_type_index  = 1;
+  int32     annotation         = 2;   // -1 if absent
+  double    spammer_prob_mean  = 3;   // S[0][j].GetMean() from a previous Infer call
+  BetaParams current_theta     = 4;
+}
+
+message UpdatePriorsRequest {
+  string verdict      = 1;   // "TRUE_ALARM" or "FALSE_ALARM"
+  double learning_rate = 2;
+  repeated SensorPriorUpdate sensors = 3;
+}
+
+message UpdatedTheta {
+  int32  sensor_type_index = 1;
+  double alpha             = 2;
+  double beta              = 3;
+}
+
+message UpdatePriorsResponse {
+  repeated UpdatedTheta updated_thetas = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status          = 1;   // "healthy" or "degraded"
+  int32  pool_available  = 2;
+  int32  pool_total      = 3;
+  int64  uptime_seconds  = 4;
+}

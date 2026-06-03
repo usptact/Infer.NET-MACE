@@ -96,32 +96,46 @@ namespace MACE
 
         /// <summary>
         /// Initializes the true labels with random assignments to break symmetry.
-        /// This is important for proper convergence of the inference algorithm.
+        /// Delegates to the warm-start overload with <c>warmStart = null</c>.
         /// </summary>
-        /// <param name="numItems">Number of items in the dataset.</param>
-        /// <param name="numCategories">Number of possible label categories.</param>
-        /// <exception cref="ArgumentOutOfRangeException">Thrown when numItems or numCategories is non-positive.</exception>
         public void InitializeLabels(int numItems, int numCategories)
+            => InitializeLabels(numItems, numCategories, null);
+
+        /// <summary>
+        /// Initializes the true labels for VMP symmetry-breaking.
+        /// When <paramref name="warmStart"/> is provided its distributions are used directly,
+        /// allowing the solver to start near a previous posterior and converge in fewer iterations.
+        /// Falls back to random point-mass initialization when <paramref name="warmStart"/> is null.
+        /// </summary>
+        /// <param name="numItems">Number of items (must equal warmStart.Length when warm-starting).</param>
+        /// <param name="numCategories">Number of possible label categories.</param>
+        /// <param name="warmStart">
+        /// Optional prior distributions from a previous inference cycle on the same incident.
+        /// Null triggers the original random initialization.
+        /// </param>
+        public void InitializeLabels(int numItems, int numCategories, Discrete[]? warmStart)
         {
             if (numItems <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(numItems), "Number of items must be positive.");
-            }
-
             if (numCategories <= 0)
-            {
                 throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
+
+            Discrete[] initialLabels;
+
+            if (warmStart != null && warmStart.Length == numItems)
+            {
+                initialLabels = warmStart;
+            }
+            else
+            {
+                initialLabels = new Discrete[numItems];
+                for (int item = 0; item < numItems; item++)
+                {
+                    int randomLabel = Rand.Int(numCategories);
+                    initialLabels[item] = Discrete.PointMass(randomLabel, numCategories);
+                }
             }
 
-            // Initialize true labels array with random label assignments to break symmetry
-            var initialLabels = new Discrete[numItems];
-            for (int item = 0; item < numItems; item++)
-            {
-                // Randomly assign a label to break symmetry
-                int randomLabel = Rand.Int(numCategories);
-                initialLabels[item] = Discrete.PointMass(randomLabel, numCategories);
-            }
-            
             _trueLabels.InitialiseTo(Distribution<int>.Array(initialLabels));
         }
     }

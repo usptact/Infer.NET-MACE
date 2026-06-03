@@ -1,0 +1,145 @@
+version: "3.9"
+
+# Local development stack — no k8s required.
+# Usage:
+#   docker compose up -d                    # start everything
+#   docker compose up -d mqtt redis postgres # start infra only
+#   docker compose logs -f mace-inference
+
+services:
+
+  # ─── Infrastructure ────────────────────────────────────────────────────────
+
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./k8s/01-infrastructure/mqtt/configmap.yaml:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: threatsense
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: threatsense
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./k8s/01-infrastructure/postgres/initdb-configmap.yaml:/docker-entrypoint-initdb.d/init.sql:ro
+
+  # ─── Application Services ──────────────────────────────────────────────────
+
+  sensor-gateway:
+    build:
+      context: ..
+      dockerfile: dockerfiles/sensor-gateway/Dockerfile
+    ports:
+      - "8081:8081"
+      - "8080:8080"
+    environment:
+      MQTT_BROKER_URL: mqtt://mqtt:1883
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: threatsense
+      POSTGRES_USER: threatsense
+      POSTGRES_PASSWORD: changeme
+      EVENT_STREAM_KEY: ts:sensor-events
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    depends_on: [mqtt, redis, postgres]
+
+  incident-manager:
+    build:
+      context: ..
+      dockerfile: dockerfiles/incident-manager/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: threatsense
+      POSTGRES_USER: threatsense
+      POSTGRES_PASSWORD: changeme
+      EVENT_STREAM_KEY: ts:sensor-events
+      INFERENCE_STREAM_KEY: ts:inference-requests
+      INCIDENT_WINDOW_SECONDS: "60"
+      INFERENCE_DEBOUNCE_MS: "200"
+      SENSOR_TYPES: CAMERA_CV,MICROPHONE,ACCESS_CONTROL,DOOR_SENSOR,GLASS_BREAK,BADGE_READER,TIME_CONTEXT
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    depends_on: [redis, postgres]
+
+  mace-inference:
+    build:
+      context: ..
+      dockerfile: dockerfiles/mace-inference/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: threatsense
+      POSTGRES_USER: threatsense
+      POSTGRES_PASSWORD: changeme
+      INFERENCE_STREAM_KEY: ts:inference-requests
+      POSTERIOR_STREAM_KEY: ts:posteriors
+      NUM_CATEGORIES: "5"
+      NUM_SENSOR_TYPES: "7"
+      POOL_SIZE: "2"
+      MIN_SENSORS_FOR_INFERENCE: "2"
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    # /dev/shm size is limited in Docker by default; increase for MKL
+    shm_size: 256m
+    depends_on: [redis, postgres]
+
+  threat-score-svc:
+    build:
+      context: ..
+      dockerfile: dockerfiles/threat-score-svc/Dockerfile
+    ports:
+      - "8082:8080"
+    environment:
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: threatsense
+      POSTGRES_USER: threatsense
+      POSTGRES_PASSWORD: changeme
+      POSTERIOR_STREAM_KEY: ts:posteriors
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    depends_on: [redis, postgres]
+
+  feedback-processor:
+    build:
+      context: ..
+      dockerfile: dockerfiles/feedback-processor/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: threatsense
+      POSTGRES_USER: threatsense
+      POSTGRES_PASSWORD: changeme
+      LEARNING_RATE: "0.5"
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    depends_on: [postgres, redis]
+
+  operator-console:
+    build:
+      context: ..
+      dockerfile: dockerfiles/operator-console/Dockerfile
+    ports:
+      - "3000:80"
+
+volumes:
+  mqtt-data:
+  redis-data:
+  postgres-data:

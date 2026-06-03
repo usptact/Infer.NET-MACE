@@ -17,6 +17,15 @@ namespace MACE
         protected VariableArray<VariableArray<int>, int[][]> _annotations;
 
         /// <summary>
+        /// Convenience constructor for the online inference pod.
+        /// <c>numItems</c> is always 1 in the online setting (one active incident per request).
+        /// </summary>
+        /// <param name="numSensorTypes">Number of sensor types (= workers in MACE terminology).</param>
+        /// <param name="numCategories">Number of threat-level categories (5 in ThreatSense).</param>
+        public MACETrain(int numSensorTypes, int numCategories)
+            : this(numSensorTypes, numItems: 1, numCategories) { }
+
+        /// <summary>
         /// Initializes a new instance of the MACETrain class.
         /// </summary>
         /// <param name="numWorkers">Number of workers in the dataset.</param>
@@ -131,6 +140,67 @@ namespace MACE
             posteriors.SDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators);
 
             return posteriors;
+        }
+
+        /// <summary>
+        /// Online single-incident inference.
+        /// Accepts a flat annotation vector (one entry per sensor type, -1 = absent),
+        /// injects the supplied priors, optionally warm-starts from a previous posterior,
+        /// and returns a typed result that avoids batch-array indexing by the caller.
+        /// </summary>
+        /// <param name="annotations">
+        /// Flat array of length <c>numSensorTypes</c>. -1 marks absent sensors.
+        /// </param>
+        /// <param name="priors">Current theta and phi priors from the Belief Store.</param>
+        /// <param name="warmStart">
+        /// Optional: T[0] posterior from a previous call on the same incident.
+        /// Improves convergence speed on subsequent calls.
+        /// </param>
+        public OnlineInferenceResult InferOnline(
+            int[] annotations,
+            ModelData priors,
+            Discrete? warmStart = null)
+        {
+            if (annotations is null)
+                throw new ArgumentNullException(nameof(annotations));
+            if (annotations.Length != _numWorkers.ObservedValue)
+                throw new ArgumentException(
+                    $"annotations length {annotations.Length} != numSensorTypes {_numWorkers.ObservedValue}");
+            if (priors is null)
+                throw new ArgumentNullException(nameof(priors));
+
+            SetModelData(priors);
+
+            // Discrete is a reference type — check for null directly.
+            Discrete[]? warmStartArray = warmStart is not null ? new Discrete[] { warmStart } : null;
+            InitializeLabels(1, _numCategories.ObservedValue, warmStartArray);
+
+            var posterior = InferModelData(new int[1][] { annotations });
+
+            var tDist = posterior.TDist[0];
+            var sDist = posterior.SDist[0];
+            var probs  = tDist.GetProbs();
+
+            int    threatLevel = 0;
+            double confidence  = 0.0;
+            for (int i = 0; i < probs.Count; i++)
+            {
+                if (probs[i] > confidence)
+                {
+                    confidence  = probs[i];
+                    threatLevel = i;
+                }
+            }
+
+            double entropy = 0.0;
+            for (int i = 0; i < probs.Count; i++)
+            {
+                double p = probs[i];
+                if (p > 0.0)
+                    entropy -= p * Math.Log(p);
+            }
+
+            return new OnlineInferenceResult(tDist, sDist, threatLevel, confidence, entropy);
         }
     }
 }

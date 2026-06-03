@@ -3,6 +3,19 @@
 namespace MACE
 {
     /// <summary>
+    /// Typed result of a single-incident online inference call.
+    /// Unwraps the batch arrays so callers never index <c>[0]</c> manually.
+    /// </summary>
+    public record OnlineInferenceResult(
+        Discrete    TDist,       // posterior over threat levels (length = NumCategories)
+        Bernoulli[] SDist,       // spammer posteriors, one per sensor type
+        int         ThreatLevel, // argmax(TDist.GetProbs())
+        double      Confidence,  // max probability
+        double      Entropy      // Shannon entropy (uncertainty measure)
+    );
+
+
+    /// <summary>
     /// Contains the distributions for the MACE model parameters.
     /// This class holds both prior and posterior distributions for the model variables.
     /// </summary>

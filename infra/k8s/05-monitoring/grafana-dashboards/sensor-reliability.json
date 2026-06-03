@@ -1,0 +1,54 @@
+{
+  "__inputs": [],
+  "__requires": [{ "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" }],
+  "title": "ThreatSense – Sensor Reliability",
+  "uid": "threatsense-reliability",
+  "tags": ["threatsense", "sensors"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sensor Reliability (θ mean = 1 - spammer probability)",
+      "type": "bargauge",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "targets": [{
+        "expr": "threatsense_sensor_reliability_mean",
+        "legendFormat": "{{sensor_id}}"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 1, "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 0.6 },
+              { "color": "green",  "value": 0.8 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "False Alarm Rate by Sensor (30d)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "targets": [{
+        "expr": "threatsense_sensor_false_alarm_rate",
+        "legendFormat": "{{sensor_id}}",
+        "instant": true
+      }]
+    },
+    {
+      "id": 3,
+      "title": "Incidents Seen per Sensor",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "targets": [{
+        "expr": "threatsense_sensor_incidents_seen_total",
+        "legendFormat": "{{sensor_id}}"
+      }]
+    }
+  ]
+}

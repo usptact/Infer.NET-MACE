@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mqtt-broker
+  namespace: threatsense
+spec:
+  serviceName: mqtt-broker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqtt-broker
+  template:
+    metadata:
+      labels:
+        app: mqtt-broker
+    spec:
+      containers:
+      - name: mosquitto
+        image: eclipse-mosquitto:2.0
+        ports:
+        - containerPort: 1883
+          name: mqtt
+        - containerPort: 8883
+          name: mqtt-tls
+        volumeMounts:
+        - name: config
+          mountPath: /mosquitto/config
+        - name: data
+          mountPath: /mosquitto/data
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        livenessProbe:
+          tcpSocket:
+            port: 1883
+          initialDelaySeconds: 10
+          periodSeconds: 30
+      volumes:
+      - name: config
+        configMap:
+          name: mqtt-config
+          items:
+          - key: mosquitto.conf
+            path: mosquitto.conf
+          - key: acl
+            path: acl
+      - name: data
+        persistentVolumeClaim:
+          claimName: mqtt-data

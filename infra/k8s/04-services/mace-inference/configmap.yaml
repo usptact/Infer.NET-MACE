@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mace-inference-config
+  namespace: threatsense
+data:
+  REDIS_URL: "redis://redis:6379"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "threatsense"
+  INFERENCE_STREAM_KEY: "ts:inference-requests"
+  POSTERIOR_STREAM_KEY: "ts:posteriors"
+  NUM_CATEGORIES: "5"         # CLEAR=0, LOW=1, MEDIUM=2, HIGH=3, CRITICAL=4
+  NUM_SENSOR_TYPES: "7"       # must match SENSOR_TYPES in incident-manager config
+  POOL_SIZE: "4"              # MACETrain instance pool per pod replica
+  MIN_SENSORS_FOR_INFERENCE: "2"
+  VMP_MAX_ITERATIONS: "30"

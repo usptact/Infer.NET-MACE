@@ -1,0 +1,167 @@
+---
+# Traefik ingress → sensor-gateway (REST + gRPC)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-sensor-gateway
+  namespace: threatsense
+spec:
+  podSelector:
+    matchLabels:
+      app: sensor-gateway
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system   # Traefik runs in kube-system
+    ports:
+    - port: 8080
+    - port: 8081
+---
+# Traefik ingress → threat-score-svc (WebSocket)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-threat-score-svc
+  namespace: threatsense
+spec:
+  podSelector:
+    matchLabels:
+      app: threat-score-svc
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - port: 8080
+---
+# Traefik ingress → operator-console
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-operator-console
+  namespace: threatsense
+spec:
+  podSelector:
+    matchLabels:
+      app: operator-console
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - port: 80
+---
+# sensor-gateway → redis (event stream write)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sensor-gateway-to-redis
+  namespace: threatsense
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: sensor-gateway
+    ports:
+    - port: 6379
+---
+# incident-manager → redis + postgres
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-incident-manager-to-stores
+  namespace: threatsense
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values: [redis, postgres]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: incident-manager
+    ports:
+    - port: 6379
+    - port: 5432
+---
+# mace-inference → redis + postgres (read priors, write posteriors)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mace-inference-to-stores
+  namespace: threatsense
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values: [redis, postgres]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: mace-inference
+    ports:
+    - port: 6379
+    - port: 5432
+---
+# threat-score-svc → redis (read posteriors stream)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-threat-score-svc-to-redis
+  namespace: threatsense
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: threat-score-svc
+    ports:
+    - port: 6379
+---
+# feedback-processor → postgres (write prior updates + audit log)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-feedback-processor-to-postgres
+  namespace: threatsense
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: feedback-processor
+    ports:
+    - port: 5432
+---
+# Prometheus scraping (monitoring namespace → all pods)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: threatsense
+spec:
+  podSelector: {}
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9090   # metrics endpoint on all TS services

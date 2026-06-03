@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mace-inference
+  namespace: threatsense
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mace-inference
+  template:
+    metadata:
+      labels:
+        app: mace-inference
+    spec:
+      containers:
+      - name: mace-inference
+        image: 192.168.10.201:5000/threatsense/mace-inference:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        envFrom:
+        - configMapRef:
+            name: mace-inference-config
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_USER
+        # Required: .NET on Linux without ICU package
+        - name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
+          value: "1"
+        # Required: Infer.NET MKL uses /dev/shm for shared memory buffers
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "512Mi"
+          limits:
+            cpu: "3000m"
+            memory: "1Gi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi

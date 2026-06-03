@@ -1,0 +1,72 @@
+---
+# Redirect HTTP → HTTPS
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: threatsense
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: threatsense-http
+  namespace: threatsense
+spec:
+  entryPoints: [web]
+  routes:
+  - match: PathPrefix(`/`)
+    kind: Rule
+    middlewares:
+    - name: redirect-https
+    services:
+    - name: operator-console
+      port: 80
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: threatsense-https
+  namespace: threatsense
+spec:
+  entryPoints: [websecure]
+  routes:
+  # WebSocket — sticky sessions required (WS is stateful per connection)
+  - match: PathPrefix(`/ws/v1`)
+    kind: Rule
+    services:
+    - name: threat-score-svc
+      port: 8080
+      sticky:
+        cookie:
+          name: ts_srv
+          secure: true
+          httpOnly: true
+
+  # REST API
+  - match: PathPrefix(`/api/v1`)
+    kind: Rule
+    services:
+    - name: sensor-gateway
+      port: 8081
+
+  # gRPC (uses h2c — cleartext HTTP/2 within TLS-terminated connection)
+  - match: PathPrefix(`/grpc`)
+    kind: Rule
+    services:
+    - name: sensor-gateway
+      port: 8080
+      scheme: h2c
+
+  # Operator console (catch-all last)
+  - match: PathPrefix(`/`)
+    kind: Rule
+    services:
+    - name: operator-console
+      port: 80
+
+  tls:
+    secretName: threatsense-tls

@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mqtt-config
+  namespace: threatsense
+data:
+  mosquitto.conf: |
+    listener 1883
+    listener 8883
+    cafile  /etc/mosquitto/certs/ca.crt
+    certfile /etc/mosquitto/certs/tls.crt
+    keyfile  /etc/mosquitto/certs/tls.key
+    require_certificate false
+
+    persistence true
+    persistence_location /mosquitto/data/
+
+    log_dest stdout
+    log_type error
+    log_type warning
+    log_type notice
+
+    # Require username/password for all connections
+    allow_anonymous false
+    password_file /etc/mosquitto/passwd
+
+    # Sensors publish only; gateway subscribes
+    acl_file /etc/mosquitto/acl
+
+  acl: |
+    # Sensors: publish only to their own topic
+    pattern write sensors/%u/events
+    # Gateway service: read all sensor topics
+    user gateway
+    topic read sensors/#

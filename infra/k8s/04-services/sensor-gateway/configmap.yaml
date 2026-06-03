@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sensor-gateway-config
+  namespace: threatsense
+data:
+  MQTT_BROKER_URL: "mqtt://mqtt-broker:1883"
+  REDIS_URL: "redis://redis:6379"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "threatsense"
+  EVENT_STREAM_KEY: "ts:sensor-events"
+  # Default discretization thresholds (overridden per-sensor via API)
+  DEFAULT_PERSON_THRESHOLDS: "0.30,0.60,0.85"
+  DEFAULT_WEAPON_THRESHOLDS: "0.20,0.50,0.75"
+  DEFAULT_GUNSHOT_THRESHOLDS: "0.40,0.65,0.85"
+  RATE_LIMIT_EVENTS_PER_SECOND: "50"

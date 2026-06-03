@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: threat-score-svc
+  namespace: threatsense
+spec:
+  type: ClusterIP
+  selector:
+    app: threat-score-svc
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  - name: metrics
+    port: 9090
+    targetPort: 9090

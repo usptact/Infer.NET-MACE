@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: incident-manager-config
+  namespace: threatsense
+data:
+  REDIS_URL: "redis://redis:6379"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "threatsense"
+  EVENT_STREAM_KEY: "ts:sensor-events"
+  INFERENCE_STREAM_KEY: "ts:inference-requests"
+  INCIDENT_WINDOW_SECONDS: "60"
+  INFERENCE_DEBOUNCE_MS: "200"
+  # Sensor types registered in order — index determines column in annotation matrix
+  SENSOR_TYPES: "CAMERA_CV,MICROPHONE,ACCESS_CONTROL,DOOR_SENSOR,GLASS_BREAK,BADGE_READER,TIME_CONTEXT"
