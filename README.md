@@ -1,471 +1,411 @@
-# MACE: Multi-Annotator Competence Estimation
+# ThreatSense — MACE Inference Service
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Infer.NET](https://img.shields.io/badge/Infer.NET-0.4.2402.2904-purple.svg)](https://dotnet.github.io/infer/)
+[![gRPC](https://img.shields.io/badge/transport-gRPC-cyan.svg)](https://grpc.io)
+[![Python](https://img.shields.io/badge/test--client-FastAPI-green.svg)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A modern .NET 8.0 implementation of the MACE (Multi-Annotator Competence Estimation) algorithm using Microsoft's Infer.NET probabilistic programming framework. This implementation is based on the research paper "Learning Whom to Trust with MACE" by Dirk Hovy et al., published at NAACL 2013.
+A real-time multi-modal threat assessment system whose inference core is built on the **MACE** (Multi-Annotator Competence Estimation) Bayesian model. Sensors of any modality — cameras, microphones, access-control readers, door sensors — are treated as annotators whose reliability is learned over time. Operator feedback propagates belief updates back into the model, enabling continuous online learning.
 
-## Table of Contents
+The main deliverable in this repository is the **MACE Inference Service**: an ASP.NET Core gRPC pod that can be deployed behind a load balancer, receives per-incident annotation vectors with Bayesian priors, runs Infer.NET VMP inference, and returns full posterior distributions over threat levels. A FastAPI test gateway wraps it with HTTP/JSON endpoints for development and manual testing.
 
-- [Problem Statement](#problem-statement)
-- [How MACE Solves the Problem](#how-mace-solves-the-problem)
-- [Model Design and Assumptions](#model-design-and-assumptions)
-- [Features](#features)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Data Format](#data-format)
-- [Understanding the Output](#understanding-the-output)
-- [Example](#example)
-- [API Documentation](#api-documentation)
-- [Contributing](#contributing)
+---
+
+## Contents
+
+- [MACE Model](#mace-model)
+- [ThreatSense Domain Mapping](#threatsense-domain-mapping)
+- [Quick Start](#quick-start)
+- [Repository Structure](#repository-structure)
+- [gRPC API](#grpc-api)
+- [Test Client (FastAPI Gateway)](#test-client-fastapi-gateway)
+- [Configuration](#configuration)
+- [Kubernetes Deployment](#kubernetes-deployment)
+- [Design Documents](#design-documents)
 - [References](#references)
-- [License](#license)
 
-## Problem Statement
+---
 
-Crowdsourcing has become a popular approach for collecting large amounts of labeled data for machine learning tasks. However, crowdsourcing introduces several challenges:
+## MACE Model
 
-1. **Worker Quality Variation**: Different workers have different levels of expertise and reliability
-2. **Spammer Detection**: Some workers may provide random or malicious labels to maximize their earnings
-3. **Missing Annotations**: Not all workers annotate all items, leading to incomplete data
-4. **Ground Truth Uncertainty**: The true labels for items are often unknown, making it difficult to assess worker quality
+MACE (Hovy et al., NAACL 2013) is a hierarchical Bayesian model that aggregates noisy annotations from workers with unknown reliability to infer the true label of each item.
 
-Traditional approaches like majority voting fail to account for worker reliability and can be biased by spammers or low-quality workers.
+### Model Variables
 
-## How MACE Solves the Problem
+| Variable | Type | Description |
+|---|---|---|
+| `T[i]` | Discrete | True label for item `i` |
+| `S[i,j]` | Bernoulli | Whether worker `j` is "spamming" on item `i` |
+| `θ[j]` | Beta | Worker `j`'s base spammer probability |
+| `φ[j]` | Dirichlet | Worker `j`'s label bias when spamming |
 
-MACE addresses these challenges through a probabilistic graphical model that simultaneously:
-
-1. **Estimates True Labels**: Infers the most likely true label for each item based on all available annotations
-2. **Models Worker Reliability**: Learns a spammer probability for each worker-item pair
-3. **Handles Missing Data**: Naturally handles incomplete annotation matrices
-4. **Provides Uncertainty Quantification**: Returns probability distributions rather than point estimates
-
-The key insight is that reliable workers should agree with each other on easy items, while spammers will show random or biased behavior patterns.
-
-## Model Design and Assumptions
-
-### Probabilistic Model
-
-MACE uses a hierarchical Bayesian model with the following components:
-
-#### Model Variables
-
-- **T[i]**: True label for item i (discrete distribution over categories)
-- **S[i,j]**: Spammer indicator for worker j on item i (Bernoulli)
-- **θ[j]**: Worker j's spammer probability (Beta distribution)
-- **φ[j]**: Worker j's label preferences when spamming (Dirichlet distribution)
-
-#### Model Structure
+### Generative Process
 
 ```
 For each item i:
     T[i] ~ DiscreteUniform(numCategories)
-    
+
     For each worker j:
         S[i,j] ~ Bernoulli(θ[j])
-        
-        If S[i,j] = 0 (not spamming):
-            A[i,j] = T[i]  // Use true label
-        Else (spamming):
-            A[i,j] ~ Discrete(φ[j])  // Use spammer's preference
+
+        if S[i,j] = 0:   A[i,j] = T[i]           // reliable: reports true label
+        if S[i,j] = 1:   A[i,j] ~ Discrete(φ[j]) // spammer: reports biased label
 ```
 
-#### Key Assumptions
+Inference uses **Variational Message Passing (VMP)** via Microsoft Infer.NET. VMP is approximate Bayesian inference that converges quickly and handles missing annotations (absent sensors) natively through the sparse matrix structure.
 
-1. **Conditional Independence**: Given the true label and spammer indicators, annotations are independent
-2. **Worker Consistency**: A worker's spammer behavior is consistent across items (modeled by θ[j])
-3. **Spammer Preferences**: When spamming, workers have consistent label preferences (modeled by φ[j])
-4. **Uniform Priors**: We use uninformative priors to let the data drive the inference
+### Online Learning
 
-### Inference
+In the batch formulation T, S, θ, φ are inferred jointly from a fixed matrix. In the online setting used here:
 
-The model uses variational message passing (VMP) for approximate Bayesian inference, which is efficient and scales well to large datasets.
-
-## Features
-
-- ✅ **Modern .NET 8.0**: Built with the latest .NET framework
-- ✅ **Latest Infer.NET**: Uses the most recent version (0.4.2402.2904)
-- ✅ **Robust Error Handling**: Comprehensive input validation and error reporting
-- ✅ **XML Documentation**: Fully documented API with IntelliSense support
-- ✅ **Cross-Platform**: Runs on Windows, macOS, and Linux
-- ✅ **Memory Efficient**: Proper resource management with IDisposable pattern
-- ✅ **Type Safe**: Nullable reference types and modern C# features
-
-## Prerequisites
-
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
-- Windows, macOS, or Linux
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/Infer.NET-MACE.git
-cd Infer.NET-MACE
-```
-
-2. Restore dependencies:
-```bash
-dotnet restore
-```
-
-3. Build the project:
-```bash
-dotnet build
-```
-
-## Usage
-
-### Basic Usage
-
-Run MACE on a CSV file containing annotation data:
-
-```bash
-dotnet run --project MACE -- sample_data.txt
-```
-
-### Command Line Options
-
-```bash
-MACE.exe <CSV_FILE>
-```
-
-**Parameters:**
-- `<CSV_FILE>`: Path to the CSV file containing annotation data
-
-**Output Files:**
-- `<input_name>_item_labels.csv`: Inferred label probabilities for each item
-- `<input_name>_worker_spammer_probs.csv`: Spammer probabilities for each worker-item pair
-
-**Example:**
-```bash
-dotnet run --project MACE -- MACE/sample_data.txt
-```
-
-This will generate:
-- `MACE/sample_data_item_labels.csv`
-- `MACE/sample_data_worker_spammer_probs.csv`
-
-## Data Format
-
-The input CSV file should follow this format:
-
-### Header Row
-The first row contains worker identifiers (column names). Worker names can be arbitrary strings.
-
-### Data Rows
-Each subsequent row represents one item to be annotated. Columns correspond to workers, and cells contain:
-- **Integer values** (0, 1, 2, ...): The annotation label for that worker-item pair
-- **Empty cells**: Missing annotations (worker did not annotate this item)
-
-### Data Quality Requirements
-
-MACE enforces the following data quality requirements:
-
-1. **Minimum Worker Coverage**: Each work item must be seen by at least 3 different workers for reliable inference
-2. **No Duplicate Annotations**: Workers cannot provide multiple annotations for the same item
-   - If duplicates are found, only the first occurrence is kept
-   - Duplicate annotations are automatically removed and reported
-
-### Validation Process
-
-During data loading, MACE automatically:
-- **Checks worker coverage**: Reports items with fewer than 3 workers as warnings
-- **Handles duplicates**: Removes duplicate annotations and reports which duplicates were found
-- **Provides summary**: Shows detailed validation messages in the console output
-
-### Example
-
-```csv
-w1,w2,w3,w4,w5,w6,w7,w8
-0,,,1,0,,,0
-,2,,,1,,,0
-1,1,,,,,0,1
-,1,,1,,,,1
-1,,,,1,1,0,
-,2,1,2,,,,
-0,0,2,,,,0,
-1,,,,0,0,0,
-,1,1,,,0,,
-2,0,2,,,2,,
-```
-
-**Interpretation:**
-- 8 workers (w1 through w8)
-- 10 items to be annotated
-- 3 label categories (0, 1, 2)
-- Missing annotations are represented by empty cells
-- Worker 7 appears to be a spammer (always provides label 0)
-- Worker 8 appears to be reliable (provides correct labels)
-
-## Understanding the Output
-
-MACE produces two CSV output files:
-
-### 1. Item Labels CSV (`<input_name>_item_labels.csv`)
-
-Contains the posterior distribution over possible labels for each item:
-
-```csv
-Item,Label_0_Probability,Label_1_Probability,Label_2_Probability,Most_Probable_Label,Confidence
-Item_1,0.947293,0.043987,0.008720,Label_0,0.947293
-Item_2,0.368018,0.324444,0.307538,Label_0,0.368018
-Item_3,0.020812,0.968046,0.011142,Label_1,0.968046
-```
-
-**Columns:**
-- `Item`: Item identifier
-- `Label_X_Probability`: Probability that the item belongs to label category X
-- `Most_Probable_Label`: The label with highest probability
-- `Confidence`: The probability of the most probable label
-
-**Interpretation:**
-- Item 1: 94.7% probability of being label 0, 4.4% label 1, 0.9% label 2
-- Item 2: Uncertain between all three labels (high entropy)
-- Item 3: 96.8% probability of being label 1
-
-### 2. Worker Spammer Probabilities CSV (`<input_name>_worker_spammer_probs.csv`)
-
-Contains the probability that each worker is spamming on each item:
-
-```csv
-Item,Worker,Spammer_Probability
-Item_1,Worker_1,0.198094
-Item_1,Worker_2,0.500204
-Item_1,Worker_7,0.733200
-Item_2,Worker_7,0.733200
-```
-
-**Columns:**
-- `Item`: Item identifier
-- `Worker`: Worker identifier
-- `Spammer_Probability`: Probability that the worker is spamming on this item
-
-**Interpretation:**
-- Values close to 1.0 indicate likely spamming behavior
-- Values close to 0.0 indicate reliable annotation
-- Worker 7 shows consistently high spammer probabilities (0.73+)
-
-### Interpretation Guidelines
-
-1. **Item Difficulty**: High entropy in label distributions indicates difficult items
-2. **Worker Quality**: Consistently high spammer probabilities suggest unreliable workers
-3. **Confidence**: Sharp probability distributions indicate high confidence in predictions
-4. **Missing Data**: The model naturally handles incomplete annotation matrices
-5. **Data Quality**: Pay attention to validation warnings - items with insufficient workers may have unreliable predictions
-
-## Data Quality Best Practices
-
-### Recommended Data Collection
-
-1. **Worker Coverage**: Aim for at least 3-5 workers per item for reliable inference
-2. **Avoid Duplicates**: Ensure each worker annotates each item only once
-3. **Balanced Design**: Try to have roughly equal numbers of annotations per worker
-4. **Quality Control**: Include some gold standard items to validate worker quality
-
-### Common Issues and Solutions
-
-1. **Insufficient Workers**: 
-   - **Problem**: Items with <3 workers have unreliable predictions
-   - **Solution**: Collect more annotations for these items or exclude them
-
-2. **Duplicate Annotations**:
-   - **Problem**: Workers providing multiple labels for the same item
-   - **Solution**: MACE automatically handles this by keeping only the first occurrence
-
-3. **Imbalanced Coverage**:
-   - **Problem**: Some workers annotate many items, others few
-   - **Solution**: This is acceptable, but consider worker reliability scores
-
-### Validation Messages
-
-MACE provides detailed validation messages to help you understand data quality:
-
-- **WARNING**: Items with insufficient worker coverage
-- **INFO**: Duplicate annotations that were automatically handled
-- **Statistics**: Summary of data dimensions and coverage
-
-## Example
-
-Let's walk through a complete example using the provided sample data:
-
-```bash
-# Run MACE on the sample data
-dotnet run --project MACE -- MACE/sample_data.txt
-```
-
-**Sample Console Output:**
-```
-=== MACE: Multi-Annotator Competence Estimation ===
-
-Input file: MACE/sample_data.txt
-Output files:
-  Item labels: MACE/sample_data_item_labels.csv
-  Spammer probabilities: MACE/sample_data_worker_spammer_probs.csv
-
-Reading input data...
-*** DATA STATISTICS ***
-Number of items: 10
-Number of workers: 8
-Number of categories: 3
-
-*** DATA QUALITY VALIDATION ***
-INFO: Found 16 duplicate annotations (kept first occurrence):
-  - Item 1: Workers 5, 8 had duplicate annotations (kept first occurrence)
-  - Item 3: Workers 2, 8 had duplicate annotations (kept first occurrence)
-  - Item 4: Workers 4, 8 had duplicate annotations (kept first occurrence)
-  - Item 5: Workers 5, 6 had duplicate annotations (kept first occurrence)
-  - Item 6: Workers 4 had duplicate annotations (kept first occurrence)
-  - Item 7: Workers 2, 7 had duplicate annotations (kept first occurrence)
-  - Item 8: Workers 6, 7 had duplicate annotations (kept first occurrence)
-  - Item 9: Workers 3 had duplicate annotations (kept first occurrence)
-  - Item 10: Workers 3, 6 had duplicate annotations (kept first occurrence)
-
-Initializing MACE model priors...
-Creating probabilistic model...
-Running probabilistic inference...
-Writing results to CSV files...
-
-*** INFERENCE COMPLETED SUCCESSFULLY ***
-Results written to:
-  - MACE/sample_data_item_labels.csv
-  - MACE/sample_data_worker_spammer_probs.csv
-```
-
-**Analysis:**
-- Items 1, 3, 4, 5, 6, 7, 10 have confident predictions (high confidence values)
-- Item 2 is genuinely difficult (low confidence, high uncertainty)
-- Worker 7 is correctly identified as a spammer (high spammer probabilities)
-- Worker 8 is correctly identified as reliable (low spammer probabilities)
-
-## API Documentation
-
-### Core Classes
-
-#### `MACEBase`
-Abstract base class defining the probabilistic model structure.
-
-```csharp
-public abstract class MACEBase
-{
-    public InferenceEngine InferenceEngine { get; protected set; }
-    public virtual void CreateModel();
-    public virtual void SetModelData(ModelData modelData);
-    public void InitializeLabels(int numItems, int numCategories);
-}
-```
-
-#### `MACETrain`
-Implements the complete MACE model including the observation model.
-
-```csharp
-public class MACETrain : MACEBase
-{
-    public MACETrain(int numWorkers, int numItems, int numCategories);
-    public override void CreateModel();
-    public ModelData InferModelData(int[][] data);
-}
-```
-
-#### `ModelData`
-Container for model parameters and posterior distributions.
-
-```csharp
-public class ModelData
-{
-    public Beta[] ThetaDist { get; set; }        // Worker spammer probabilities
-    public Dirichlet[] PhiDist { get; set; }     // Worker label preferences
-    public Discrete[] TDist { get; set; }        // True label distributions
-    public Bernoulli[][] SDist { get; set; }     // Spammer indicators
-}
-```
-
-#### `CsvReader`
-Handles reading and parsing CSV annotation files.
-
-```csharp
-public class CsvReader : IDisposable
-{
-    public CsvReader(string fileName);
-    public void Read();
-    public int[][] GetData();
-    public int GetNumWorkers();
-    public int GetNumItems();
-    public int GetNumCategories();
-}
-```
-
-### Usage Example
-
-```csharp
-using var reader = new CsvReader("annotations.csv");
-reader.Read();
-var data = reader.GetData();
-
-var trainer = new MACETrain(
-    reader.GetNumWorkers(),
-    reader.GetNumItems(),
-    reader.GetNumCategories() + 1
-);
-
-trainer.CreateModel();
-trainer.InitializeLabels(reader.GetNumItems(), reader.GetNumCategories() + 1);
-
-var initPriors = new ModelData
-{
-    ThetaDist = Enumerable.Range(0, reader.GetNumWorkers())
-        .Select(_ => new Beta(1, 1)).ToArray(),
-    PhiDist = Enumerable.Range(0, reader.GetNumWorkers())
-        .Select(_ => new Dirichlet(Enumerable.Repeat(1.0, reader.GetNumCategories() + 1).ToArray()))
-        .ToArray()
-};
-
-trainer.SetModelData(initPriors);
-var posterior = trainer.InferModelData(data);
-
-// Access results
-var itemLabels = posterior.TDist;
-var spammerProbs = posterior.SDist;
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests if applicable
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-### Code Style
-
-This project follows modern C# conventions:
-- Use nullable reference types
-- Prefer `var` for local variables
-- Use expression-bodied members where appropriate
-- Include XML documentation for public APIs
-- Follow the existing naming conventions
-
-## References
-
-1. **Original MACE Paper**: Dirk Hovy, Taylor Berg-Kirkpatrick, Ashish Vaswani, Eduard Hovy. "Learning Whom to Trust with MACE". Proceedings of NAACL 2013. [PDF](http://www.aclweb.org/anthology/N13-1132)
-
-2. **Infer.NET**: Microsoft Research's probabilistic programming framework. [Website](https://dotnet.github.io/infer/)
-
-3. **Crowdsourcing Quality Control**: For broader context on crowdsourcing quality assessment methods.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+1. Each active **incident** is a single item (`numItems = 1`).
+2. **Priors** `θ[j]` and `φ[j]` are loaded from the Belief Store per request and reflect everything learned from past incidents.
+3. After the operator closes an incident with a verdict, the **Feedback Processor** applies a Bayesian Beta update to `θ[j]`, reinforcing reliable sensors and penalising false-alarm contributors.
+4. Updated priors are written back to the Belief Store and injected into the next request — completing the online learning loop.
 
 ---
 
-**Note**: This is a modernized implementation of the original MACE algorithm. While the core probabilistic model remains the same, the codebase has been updated to use .NET 8.0, the latest Infer.NET framework, and modern C# best practices for improved maintainability, performance, and developer experience.
+## ThreatSense Domain Mapping
+
+| MACE Concept | Physical Security Equivalent |
+|---|---|
+| Worker `j` | Sensor / modality (camera, mic, door sensor, badge reader…) |
+| Item `i` | Threat incident (spatiotemporal event cluster) |
+| Annotation `A[i,j]` | Sensor `j`'s discretised threat assessment for incident `i` (0–4) |
+| True label `T[i]` | Latent threat level: 0=CLEAR, 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL |
+| Spammer probability `θ[j]` | Sensor `j`'s false-alarm rate |
+| Spammer preference `φ[j]` | Direction of sensor `j`'s bias when unreliable |
+| Missing annotation | Sensor not covering the incident zone / offline |
+| Operator feedback | Gold-standard verdict used to update priors |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- Python 3.11+ (for the test client)
+- Docker (optional, for local infra)
+
+### 1 — Build and run the gRPC service
+
+```bash
+dotnet build MACE/MACE.csproj
+dotnet run --project MACE
+# Service starts on http://localhost:8080 (gRPC / H2C)
+# Metrics on http://localhost:9090/metrics
+```
+
+### 2 — Set up the FastAPI test gateway
+
+```bash
+cd test-client
+make install     # pip install -r requirements.txt
+make generate    # generate Python stubs from the .proto file
+make run         # uvicorn main:app --reload --port 8000
+```
+
+Open **http://localhost:8000/docs** for the interactive Swagger UI.
+
+### 3 — Send a test inference request
+
+```bash
+curl -s -X POST http://localhost:8000/infer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "incident_id": "lobby-001",
+    "annotations": [3, 3, -1, -1, 2, -1, 0],
+    "theta_priors": [
+      {"alpha":1,"beta":9}, {"alpha":1,"beta":9}, {"alpha":5,"beta":5},
+      {"alpha":5,"beta":5}, {"alpha":2,"beta":8}, {"alpha":5,"beta":5},
+      {"alpha":5,"beta":5}
+    ],
+    "phi_priors": [
+      {"pseudocounts":[1,1,1,1,1]}, {"pseudocounts":[1,1,1,1,1]},
+      {"pseudocounts":[1,1,1,1,1]}, {"pseudocounts":[1,1,1,1,1]},
+      {"pseudocounts":[1,1,1,1,1]}, {"pseudocounts":[1,1,1,1,1]},
+      {"pseudocounts":[1,1,1,1,1]}
+    ]
+  }' | python3 -m json.tool
+```
+
+Expected response: `threat_level: 3` (HIGH), `confidence ≥ 0.70`.
+
+---
+
+## Repository Structure
+
+```
+.
+├── MACE/                          # The gRPC inference service (.NET 8 / Infer.NET)
+│   ├── Protos/
+│   │   └── mace_inference.proto   # gRPC service contract (Infer, UpdatePriors, Health)
+│   ├── Core/
+│   │   ├── InferenceOptions.cs    # Config POCO (bound from appsettings / env vars)
+│   │   └── InferencePool.cs       # Thread-safe pool of MACETrain instances
+│   ├── Services/
+│   │   ├── MaceInferenceGrpcService.cs  # gRPC service implementation
+│   │   └── PriorUpdateService.cs        # Bayesian Beta prior update (pure arithmetic)
+│   ├── MACEBase.cs                # Abstract Infer.NET model graph
+│   ├── MACETrain.cs               # Batch + online inference; InferOnline() method
+│   ├── ModelData.cs               # ModelData + OnlineInferenceResult records
+│   ├── Program.cs                 # ASP.NET Core bootstrap (Minimal API + gRPC)
+│   └── appsettings.json           # Default configuration
+│
+├── test-client/                   # FastAPI HTTP→gRPC bridge (Python)
+│   ├── main.py                    # FastAPI app; /infer, /update-priors, /health
+│   ├── generate_stubs.sh          # Generates Python stubs from the .proto file
+│   ├── Makefile                   # make install / generate / run / curl-*
+│   └── README.md
+│
+├── infra/                         # Kubernetes manifests and tooling
+│   ├── k3s/                       # Cluster bootstrap scripts
+│   ├── helm-values/               # MetalLB, NFS provisioner, cert-manager, monitoring
+│   ├── k8s/                       # Namespace, infrastructure, services, network policies
+│   ├── docker-compose.yml         # Full local dev stack (no Kubernetes needed)
+│   └── Makefile                   # make build / push / deploy
+│
+├── dockerfiles/                   # Multi-stage Dockerfiles for all six services
+│
+├── testdata/                      # Batch annotation data for offline MACE experiments
+│   ├── sample_data.txt
+│   └── adult_data.txt
+│
+├── THREATSENSE_DESIGN.md          # Full system design: requirements, APIs, sub-systems
+├── MACE_SERVICE_DESIGN.md         # Source-level rationale for every change in this service
+└── INFRASTRUCTURE.md              # On-premises Kubernetes deployment guide
+```
+
+---
+
+## gRPC API
+
+The service contract is defined in [`MACE/Protos/mace_inference.proto`](MACE/Protos/mace_inference.proto). The three RPCs are:
+
+### `Infer` — hot path
+
+Called by the Incident Manager each time an annotation vector is updated (typically every 200 ms per active incident).
+
+**Key request fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `incident_id` | string | Caller-defined incident identifier |
+| `annotations` | int32[] | One entry per sensor type; -1 = absent. Length must equal `NumSensorTypes`. |
+| `theta_priors` | BetaParams[] | Current `θ` prior per sensor type |
+| `phi_priors` | DirichletParams[] | Current `φ` prior per sensor type |
+| `warm_start` | double[] | Optional: `t_dist` from a previous call on the same incident |
+
+**Key response fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `t_dist` | double[] | Full posterior `P(CLEAR…CRITICAL \| evidence)` |
+| `threat_level` | int32 | `argmax(t_dist)` |
+| `confidence` | double | `max(t_dist)` |
+| `entropy` | double | Shannon entropy (uncertainty measure) |
+| `sensor_reliability` | SensorReliability[] | Per-sensor spammer posterior and reliability score |
+| `inference_ms` | int64 | VMP wall-clock time |
+
+**Warm-start:** On the second and subsequent calls for the same incident, pass the previous `t_dist` as `warm_start`. VMP initialises from that distribution instead of random, typically halving the iteration count.
+
+---
+
+### `UpdatePriors` — cold path
+
+Called by the Feedback Processor after an operator verdict. Pure arithmetic — does not use Infer.NET.
+
+Implements the update rules from [THREATSENSE_DESIGN.md §7.5](THREATSENSE_DESIGN.md):
+
+| Condition | Effect on Beta(α, β) |
+|---|---|
+| TRUE_ALARM + sensor flagged (annotation ≥ 2) | `β += lr × (1 − spammer_prob)` — reinforce reliability |
+| FALSE_ALARM + sensor flagged | `α += lr × spammer_prob` — penalise false alarm |
+| TRUE_ALARM + sensor missed (annotation < 2) | `α += lr × 0.3` — penalise miss |
+| FALSE_ALARM + sensor quiet (annotation < 2) | `β += lr × 0.3` — reinforce correct silence |
+| annotation = -1 | No change — sensor was absent |
+
+---
+
+### `Health` — liveness / readiness probe
+
+Returns pool availability and uptime. Kubernetes `readinessProbe` targets this RPC.
+
+---
+
+### Calling with grpcurl
+
+```bash
+# Health check
+grpcurl -plaintext localhost:8080 mace.MaceInference/Health
+
+# Inference (provide a JSON file or inline)
+grpcurl -plaintext -d '{
+  "incident_id": "test-001",
+  "annotations": [3,3,-1,-1,2,-1,0],
+  "theta_priors": [
+    {"alpha":1,"beta":9},{"alpha":1,"beta":9},{"alpha":5,"beta":5},
+    {"alpha":5,"beta":5},{"alpha":2,"beta":8},{"alpha":5,"beta":5},
+    {"alpha":5,"beta":5}
+  ],
+  "phi_priors": [
+    {"pseudocounts":[1,1,1,1,1]},{"pseudocounts":[1,1,1,1,1]},
+    {"pseudocounts":[1,1,1,1,1]},{"pseudocounts":[1,1,1,1,1]},
+    {"pseudocounts":[1,1,1,1,1]},{"pseudocounts":[1,1,1,1,1]},
+    {"pseudocounts":[1,1,1,1,1]}
+  ]
+}' localhost:8080 mace.MaceInference/Infer
+```
+
+---
+
+## Test Client (FastAPI Gateway)
+
+The test client in `test-client/` is a FastAPI application that bridges HTTP/JSON → gRPC, so any HTTP client (curl, Postman, browser) can reach the inference pod without a gRPC-aware tool.
+
+```
+test-client/main.py
+├── POST /infer           → MaceInference.Infer
+├── POST /update-priors   → MaceInference.UpdatePriors
+├── GET  /health          → MaceInference.Health
+└── GET  /docs            Swagger UI (auto-generated by FastAPI)
+```
+
+```bash
+cd test-client
+
+make install    # pip install -r requirements.txt
+make generate   # generate mace_inference_pb2*.py from the proto
+make run        # start gateway on port 8000
+
+# Smoke tests
+make curl-health
+make curl-infer
+make curl-update
+```
+
+Point at a remote pod:
+```bash
+make run TARGET=192.168.10.100:8080
+```
+
+### Sensor type index table
+
+The default 7 sensor types (configurable via `INFERENCE__NUMSENSORTYPES`):
+
+| Index | Sensor type | Annotation scale |
+|---|---|---|
+| 0 | CAMERA_CV | 0=no person → 3=high-confidence unknown person |
+| 1 | MICROPHONE | 0=ambient → 3=gunshot detected |
+| 2 | ACCESS_CONTROL | 0=normal → 3=forced entry |
+| 3 | DOOR_SENSOR | 0=closed → 3=forced open |
+| 4 | GLASS_BREAK | 0=none, 3=detected |
+| 5 | BADGE_READER | 0=valid → 3=invalid off-hours |
+| 6 | TIME_CONTEXT | 0=business hours → 2=late night |
+
+---
+
+## Configuration
+
+All values live in `MACE/appsettings.json` and can be overridden with environment variables using the standard .NET double-underscore convention.
+
+| Setting | Default | Env var | Description |
+|---|---|---|---|
+| `NumSensorTypes` | 7 | `INFERENCE__NUMSENSORTYPES` | Must match the annotation vector length |
+| `NumCategories` | 5 | `INFERENCE__NUMCATEGORIES` | Threat levels: CLEAR=0 … CRITICAL=4 |
+| `PoolSize` | 4 | `INFERENCE__POOLSIZE` | Pre-warmed MACETrain instances |
+| `MinSensorsForInference` | 2 | `INFERENCE__MINSENSORSFORINFERENCE` | Below this, returns max-annotation fallback |
+| `PoolAcquireTimeoutMs` | 5000 | `INFERENCE__POOLACQUIRETIMEOUTMS` | gRPC UNAVAILABLE after this many ms |
+
+**Port:** gRPC on `8080` (H2C — cleartext HTTP/2). Prometheus metrics on `9090`.
+
+**Pool sizing:** `PoolSize` should equal the expected request concurrency per pod. Each slot holds one pre-compiled Infer.NET factor graph (~100 MB resident). Requests queue when all slots are busy; none are rejected until `PoolAcquireTimeoutMs` expires.
+
+---
+
+## Kubernetes Deployment
+
+Full on-premises deployment on a 3-node k3s cluster with NAS-backed NFS storage is documented in [INFRASTRUCTURE.md](INFRASTRUCTURE.md).
+
+The `infra/` directory contains everything needed:
+
+```
+infra/
+├── k3s/               # Node bootstrap scripts
+├── helm-values/       # MetalLB, NFS provisioner, cert-manager, monitoring
+├── k8s/               # All Kubernetes manifests
+├── docker-compose.yml # Local dev without Kubernetes
+└── Makefile           # make build / push / deploy / rollback
+```
+
+**Local dev stack** (all services + dependencies, no Kubernetes):
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+```
+
+**Inference pod specifics** — two non-obvious requirements handled in the Deployment manifest:
+
+```yaml
+# /dev/shm for Infer.NET MKL shared memory
+volumes:
+- name: dshm
+  emptyDir: { medium: Memory, sizeLimit: 256Mi }
+
+# Debian base required — Infer.NET MKL uses glibc (not musl/Alpine)
+image: mcr.microsoft.com/dotnet/aspnet:8.0
+```
+
+---
+
+## Design Documents
+
+| Document | Contents |
+|---|---|
+| [THREATSENSE_DESIGN.md](THREATSENSE_DESIGN.md) | Full system design: MACE domain mapping, functional and non-functional requirements, API specifications for all six services, sub-system details, data models, latency budget |
+| [MACE_SERVICE_DESIGN.md](MACE_SERVICE_DESIGN.md) | Source-level rationale: exactly what changed in each file and why, thread-safety contract, model instance lifecycle, what the pod deliberately does not do |
+| [INFRASTRUCTURE.md](INFRASTRUCTURE.md) | On-premises Kubernetes deployment guide: hardware topology, k3s bootstrap, NFS storage, MetalLB, cert-manager, day-1 runbook, day-2 operations, failure recovery |
+
+---
+
+## Development
+
+### Build
+
+```bash
+dotnet build MACE/MACE.csproj
+```
+
+### Run tests
+
+The project currently validates behaviour through the test client. Integration test coverage using `xUnit` is planned.
+
+### Run the service with verbose logging
+
+```bash
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project MACE
+# PoolSize is automatically reduced to 1 in Development mode
+```
+
+### Regenerate Python stubs after proto changes
+
+```bash
+cd test-client && make generate
+```
+
+---
+
+## References
+
+1. **MACE Paper** — Dirk Hovy, Taylor Berg-Kirkpatrick, Ashish Vaswani, Eduard Hovy. "Learning Whom to Trust with MACE". *NAACL 2013*. [PDF](http://www.aclweb.org/anthology/N13-1132)
+2. **Infer.NET** — Microsoft Research probabilistic programming framework. [dotnet.github.io/infer](https://dotnet.github.io/infer/)
+3. **gRPC** — [grpc.io](https://grpc.io)
+4. **FastAPI** — [fastapi.tiangolo.com](https://fastapi.tiangolo.com)
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
