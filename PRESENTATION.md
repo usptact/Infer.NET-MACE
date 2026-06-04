@@ -90,6 +90,26 @@ These two questions are solved simultaneously. The sensor readings that agree wi
 
 After each incident and operator verdict, these priors are updated. The changes are small per incident but compound over hundreds of incidents into a precise, evidence-based reliability profile for every sensor in the facility.
 
+### The model in brief
+
+Five quantities, explained in plain terms:
+
+| Variable | What it represents | Technical form |
+|---|---|---|
+| **T[i]** | *"What is the actual threat level of incident i?"* — the thing we're trying to infer | Discrete distribution over 5 levels |
+| **A[i,j]** | *"What did sensor j report for incident i?"* — the raw observation (0–4, or absent) | Observed integer |
+| **θ[j]** | *"How often is sensor j unreliable, historically?"* — its long-term track record | Beta distribution, updated over time |
+| **S[i,j]** | *"Is sensor j behaving reliably right now, on this specific incident?"* — inferred per-call | Bernoulli (yes/no) |
+| **φ[j]** | *"When sensor j is unreliable, what does it tend to say?"* — its systematic bias | Dirichlet distribution |
+
+The model assumes: if a sensor is **reliable** on this incident, it will report the true threat level. If it is **unreliable**, it will report something according to its own bias distribution — which may be consistently too low, too high, or random noise.
+
+Given all the sensor readings, Bayesian inference works backwards: it finds the threat level T[i] and the per-sensor reliability indicators S[i,j] that best explain what was collectively observed. Sensors whose readings are consistent with the inferred threat level are rewarded; sensors that contradict it are penalized.
+
+**Online operation.** The model runs in streaming mode — one incident at a time, as sensor events arrive. Each time a new sensor fires for an active incident, inference re-runs immediately with the updated annotation. The result from the previous run is used as the starting point for the next, so convergence is fast for incremental updates. When an incident closes and the operator provides a verdict, the long-term reliability priors (θ[j]) are updated and persist into all future incidents. The inference pod itself is stateless — it receives priors and annotations as inputs and returns posteriors. All persistence lives in the Belief Store.
+
+---
+
 ### The consensus property
 
 A critical emergent behavior: **sensors that repeatedly agree with the eventual ground truth become more trusted, while sensors that repeatedly disagree become less trusted — without the system being told which is which in advance.**
