@@ -448,3 +448,13 @@ $RECYCLE.BIN/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Infer.NET / Roslyn runtime-generated inference code
+GeneratedSource/
+
+# Python gRPC generated stubs
+test-client/generated/
+
+# Python virtual environment
+test-client/.venv/
+test-client/venv/

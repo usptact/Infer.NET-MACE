@@ -45,8 +45,12 @@ try
 
     // gRPC requires HTTP/2.  TLS is terminated at the load-balancer level in
     // the Kubernetes deployment, so we listen on cleartext HTTP/2 (H2C).
+    // Port 9090 is HTTP/1.1 only — Prometheus scrapers do not support HTTP/2.
     builder.WebHost.ConfigureKestrel(o =>
-        o.ListenAnyIP(8080, lo => lo.Protocols = HttpProtocols.Http2));
+    {
+        o.ListenAnyIP(8080, lo => lo.Protocols = HttpProtocols.Http2);
+        o.ListenAnyIP(9090, lo => lo.Protocols = HttpProtocols.Http1);
+    });
 
     var app = builder.Build();
 
@@ -65,9 +69,9 @@ try
 
     app.MapGrpcService<MaceInferenceGrpcService>();
 
-    // Prometheus: separate HTTP/1.1 listener so standard scrapers work without H2C.
-    app.UseMetricServer(port: 9090);
+    // Prometheus metrics on the HTTP/1.1 port only.
     app.UseHttpMetrics();
+    app.MapMetrics("/metrics").RequireHost("*:9090");
 
     app.MapGet("/", () => "MACE Inference Service — use a gRPC client.");
 

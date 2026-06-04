@@ -21,7 +21,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         "VMP inference wall-clock time.",
         new HistogramConfiguration
         {
-            Buckets = new[] { 0.010, 0.025, 0.050, 0.100, 0.150, 0.200, 0.300, 0.500, 1.0 }
+            Buckets = new[] { 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0 }
         });
 
     private static readonly Gauge PoolAvailable = Metrics.CreateGauge(

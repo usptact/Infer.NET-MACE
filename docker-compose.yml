@@ -1,0 +1,79 @@
+# docker-compose up --build
+#
+# Services and local URLs once running:
+#   Test gateway (REST→gRPC)   http://localhost:8000
+#   Test gateway Swagger UI    http://localhost:8000/docs
+#   Grafana dashboard          http://localhost:3000  (admin / admin)
+#   Prometheus UI              http://localhost:9091
+#   MACE gRPC (direct)         localhost:8080
+#   MACE metrics (direct)      http://localhost:9090/metrics
+
+services:
+
+  mace-inference:
+    build:
+      context: .
+      dockerfile: dockerfiles/mace-inference/Dockerfile
+    image: mace-inference:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production    # pool=4, INFO logging
+    ports:
+      - "8080:8080"   # gRPC (H2C) — for grpcurl / direct access
+      - "9090:9090"   # Prometheus metrics scrape endpoint
+    networks:
+      - mace-net
+    restart: unless-stopped
+
+  test-client:
+    build:
+      context: .
+      dockerfile: test-client/Dockerfile
+    environment:
+      - MACE_GRPC_TARGET=mace-inference:8080
+    ports:
+      - "8000:8000"   # FastAPI REST gateway + Swagger UI at /docs
+    depends_on:
+      - mace-inference
+    networks:
+      - mace-net
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9091:9090"   # Prometheus UI at localhost:9091 (9090 is taken by MACE metrics)
+    networks:
+      - mace-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/mace.json
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"   # Grafana UI
+    depends_on:
+      - prometheus
+    networks:
+      - mace-net
+    restart: unless-stopped
+
+networks:
+  mace-net:
+    driver: bridge
+
+volumes:
+  grafana-data:   # persists Grafana state (annotations, manual edits) across restarts

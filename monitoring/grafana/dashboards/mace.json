@@ -1,0 +1,510 @@
+{
+  "uid": "mace-inference-v1",
+  "title": "MACE Inference Service",
+  "tags": ["mace", "inference", "grpc"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 2,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "annotations": { "list": [] },
+  "templating": { "list": [] },
+  "links": [],
+
+  "panels": [
+
+    {
+      "id": 100, "type": "row", "collapsed": false,
+      "title": "Service Overview",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+
+    {
+      "id": 1, "type": "stat",
+      "title": "Success Rate (5 m)",
+      "description": "Fraction of Infer calls that completed successfully. gRPC uses HTTP 200 for all responses — semantic outcome is tracked via mace_infer_requests_total labels: success ≡ 2xx, timeout ≡ 5xx.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "100 * sum(rate(mace_infer_requests_total{status=\"success\"}[5m])) / sum(rate(mace_infer_requests_total[5m]))",
+        "legendFormat": "%", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red",    "value": null },
+            { "color": "yellow", "value": 90 },
+            { "color": "green",  "value": 99 }
+          ]},
+          "mappings": []
+        }, "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area",
+        "justifyMode": "auto", "orientation": "auto", "textMode": "auto"
+      }
+    },
+
+    {
+      "id": 2, "type": "stat",
+      "title": "Error Rate (5 m)",
+      "description": "Pool-timeout (5xx equivalent) as a percentage of total Infer calls.",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "100 * sum(rate(mace_infer_requests_total{status=\"timeout\"}[5m])) / sum(rate(mace_infer_requests_total[5m]))",
+        "legendFormat": "%", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green",  "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red",    "value": 10 }
+          ]},
+          "mappings": []
+        }, "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area",
+        "justifyMode": "auto", "orientation": "auto", "textMode": "auto"
+      }
+    },
+
+    {
+      "id": 3, "type": "stat",
+      "title": "Request Rate",
+      "description": "Total gRPC calls/s across all three endpoints (Infer, UpdatePriors, Health).",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "sum(rate(http_requests_received_total[1m]))",
+        "legendFormat": "req/s", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "blue", "value": null }
+          ]},
+          "mappings": []
+        }, "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area",
+        "justifyMode": "auto", "orientation": "auto", "textMode": "auto"
+      }
+    },
+
+    {
+      "id": 4, "type": "stat",
+      "title": "In-Flight Requests",
+      "description": "gRPC requests currently being processed (across all endpoints).",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "sum(http_requests_in_progress)",
+        "legendFormat": "in-flight", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green",  "value": null },
+            { "color": "yellow", "value": 4 },
+            { "color": "red",    "value": 16 }
+          ]},
+          "mappings": []
+        }, "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area",
+        "justifyMode": "auto", "orientation": "auto", "textMode": "auto"
+      }
+    },
+
+    {
+      "id": 5, "type": "stat",
+      "title": "Pool Slots Available",
+      "description": "Idle inference pool slots. Drops to 0 under concurrent load; queued requests time out after PoolAcquireTimeoutMs.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "mace_pool_available",
+        "legendFormat": "slots", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red",    "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "green",  "value": 2 }
+          ]},
+          "mappings": []
+        }, "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area",
+        "justifyMode": "auto", "orientation": "auto", "textMode": "auto"
+      }
+    },
+
+    {
+      "id": 6, "type": "stat",
+      "title": "Avg Infer Latency (5 m)",
+      "description": "Mean VMP inference wall-clock time over the last 5 minutes. First call after restart is slow (~1–3 s) due to Infer.NET Roslyn JIT compilation.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "rate(mace_infer_duration_seconds_sum[5m]) / rate(mace_infer_duration_seconds_count[5m])",
+        "legendFormat": "avg", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green",  "value": null },
+            { "color": "yellow", "value": 1.5 },
+            { "color": "red",    "value": 3.0 }
+          ]},
+          "mappings": []
+        }, "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background", "graphMode": "area",
+        "justifyMode": "auto", "orientation": "auto", "textMode": "auto"
+      }
+    },
+
+    {
+      "id": 200, "type": "row", "collapsed": false,
+      "title": "Request Traffic",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+
+    {
+      "id": 7, "type": "timeseries",
+      "title": "Infer Requests by Outcome",
+      "description": "Rate of successful vs timed-out Infer calls. Note: gRPC maps all responses to HTTP 200 at the transport level — semantic outcome is carried in gRPC trailers and tracked here via custom labels. 'success' ≡ 2xx, 'timeout' ≡ 5xx. 4xx (invalid argument) not yet tracked separately.",
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "rate(mace_infer_requests_total{status=\"success\"}[1m])",
+          "legendFormat": "success (2xx)", "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "rate(mace_infer_requests_total{status=\"timeout\"}[1m])",
+          "legendFormat": "pool timeout (5xx)", "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 70,
+            "gradientMode": "none", "lineInterpolation": "linear",
+            "pointSize": 4, "showPoints": "never", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success (2xx)" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" }}] },
+          { "matcher": { "id": "byName", "options": "pool timeout (5xx)" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" }}] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+
+    {
+      "id": 8, "type": "timeseries",
+      "title": "In-Flight Requests by Endpoint",
+      "description": "Concurrent gRPC calls in-flight per endpoint. Sustained non-zero Infer count means the pool is under pressure.",
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "http_requests_in_progress",
+        "legendFormat": "{{endpoint}}", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15,
+            "gradientMode": "none", "lineInterpolation": "stepAfter",
+            "pointSize": 4, "showPoints": "auto", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+
+    {
+      "id": 300, "type": "row", "collapsed": false,
+      "title": "Latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }
+    },
+
+    {
+      "id": 9, "type": "timeseries",
+      "title": "Infer Latency Percentiles",
+      "description": "VMP inference wall-clock time at P50 / P95 / P99. Cold-start spikes (~1–3 s) on the first call after restart are expected (Infer.NET Roslyn JIT). Warm calls with a good warm_start typically land under 500 ms.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(mace_infer_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P50", "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(mace_infer_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95", "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(mace_infer_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P99", "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10,
+            "gradientMode": "none", "lineInterpolation": "smooth",
+            "pointSize": 4, "showPoints": "auto", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red",   "value": 5 }
+          ]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+
+    {
+      "id": 10, "type": "timeseries",
+      "title": "P95 Latency by Endpoint",
+      "description": "95th-percentile HTTP request duration per gRPC endpoint (from ASP.NET Core automatic instrumentation). Infer dominates; Health and UpdatePriors should be sub-millisecond.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [{
+        "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+        "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+        "legendFormat": "{{endpoint}}", "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8,
+            "gradientMode": "none", "lineInterpolation": "smooth",
+            "pointSize": 4, "showPoints": "auto", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+
+    {
+      "id": 400, "type": "row", "collapsed": false,
+      "title": "System Health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 }
+    },
+
+    {
+      "id": 11, "type": "timeseries",
+      "title": "CPU Usage",
+      "description": "Process CPU utilisation as reported by the .NET runtime. Spikes correlate with active VMP inference (Infer.NET is CPU-bound).",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "system_runtime_cpu_usage",
+          "legendFormat": "CPU %", "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "system_runtime_threadpool_thread_count",
+          "legendFormat": "thread pool size", "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 12,
+            "gradientMode": "none", "lineInterpolation": "smooth",
+            "pointSize": 4, "showPoints": "auto", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "CPU %" },
+            "properties": [{ "id": "unit", "value": "percent" }] },
+          { "matcher": { "id": "byName", "options": "thread pool size" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]}
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+
+    {
+      "id": 12, "type": "timeseries",
+      "title": "Memory",
+      "description": "Process working set (OS-reported physical memory) and .NET GC-managed heap. A growing gap between the two indicates large unmanaged allocations (e.g. Infer.NET native MKL buffers).",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "process_working_set_bytes",
+          "legendFormat": "working set", "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "dotnet_total_memory_bytes",
+          "legendFormat": "GC managed heap", "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10,
+            "gradientMode": "none", "lineInterpolation": "smooth",
+            "pointSize": 4, "showPoints": "auto", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+
+    {
+      "id": 13, "type": "timeseries",
+      "title": "GC Pressure",
+      "description": "GC heap size (MB) and time-in-GC percentage. Elevated Gen2 collection rate or high time-in-GC (>5%) indicates memory pressure — consider increasing pool size to reduce per-request allocation churn.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "system_runtime_gc_heap_size * 1048576",
+          "legendFormat": "GC heap", "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "rate(dotnet_collection_count_total{generation=\"0\"}[1m])",
+          "legendFormat": "Gen0 GC/s", "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "mace-prometheus" },
+          "expr": "rate(dotnet_collection_count_total{generation=\"2\"}[1m])",
+          "legendFormat": "Gen2 GC/s", "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8,
+            "gradientMode": "none", "lineInterpolation": "smooth",
+            "pointSize": 4, "showPoints": "auto", "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "GC heap" },
+            "properties": [{ "id": "unit", "value": "bytes" }] },
+          { "matcher": { "id": "byRegexp", "options": ".*GC/s" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]}
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    }
+
+  ]
+}
