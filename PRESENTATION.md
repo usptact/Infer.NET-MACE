@@ -36,86 +36,81 @@ Three properties distinguish it from rule-based systems:
 
 ## Requirements
 
-### Functional
-
-| | Requirement |
-|---|---|
-| **FR-1** | Ingest sensor events via MQTT, gRPC, and REST webhook |
-| **FR-2** | Cluster events into incidents by spatial zone and time window |
-| **FR-3** | Score each active incident within 500 ms of a new sensor event |
-| **FR-4** | Express threat as a posterior distribution, scalar score, and per-sensor reliability breakdown |
-| **FR-5** | Accept operator TRUE\_ALARM / FALSE\_ALARM verdicts; update sensor priors accordingly |
-| **FR-6** | Emit real-time alerts to operator consoles (WebSocket) and external systems (webhook) |
-| **FR-7** | Maintain a tamper-evident audit trail of all inferences and operator actions |
-
-### Non-Functional
-
-| | Requirement |
-|---|---|
-| **NFR-1** | Threat score latency ≤ 500 ms P99 from sensor event receipt |
-| **NFR-2** | ≥ 1,000 sensor events / second per deployment node |
-| **NFR-3** | Inference service degrades gracefully under load (queues, then sheds, never crashes) |
-| **NFR-4** | Stateless inference pod — horizontally scalable, restartable without data loss |
-| **NFR-5** | Explainable — every threat score traceable to contributing sensors and their weights |
+- Ingest heterogeneous sensor events and fuse them into a per-incident threat score within **500 ms P99**
+- Express threat as a **full probability distribution** with per-sensor reliability breakdown, not a binary alert
+- **Learn** which sensors are reliable over time; update beliefs from operator feedback without retraining
+- Degrade gracefully under load — queue then shed requests, never crash or corrupt state
+- Every score must be **explainable**: traceable to the sensors that drove it and their current reliability
+- Maintain a tamper-evident audit trail of all inferences and operator actions
 
 ---
 
 ## Assumptions & Scope
 
-**In scope (MVP):**
-- Single physical premises, fixed set of sensor types defined at deployment time
+**Current implementation assumes:**
+- A single premises with a fixed set of sensor types known at deployment time
 - Five discrete threat levels: CLEAR (0) → LOW → MEDIUM → HIGH → CRITICAL (4)
-- Sensor raw scores are discretized to 0–4 by a normalization layer before entering the system
-- Operator feedback is always binary (TRUE\_ALARM / FALSE\_ALARM) and eventually provided for all significant incidents
+- Raw sensor outputs are discretized to 0–4 before reaching the inference engine
+- Operator feedback is binary (TRUE\_ALARM / FALSE\_ALARM)
+- Sensor reliability is tracked per *type* (camera, mic…), not per individual device
 
-**Assumed away for MVP:**
-- Multi-premises correlation (incidents across buildings)
-- Continuous threat scores (extension to posterior expected value is straightforward)
-- Dynamic sensor registration at runtime
-- Active sensing (polling silent sensors mid-incident)
-- Temporal decay of old annotations within a long-running incident
+**These are not fundamental limitations — they are simplifications chosen for the MVP.** The underlying model is a general Bayesian graphical model that can be extended without architectural changes:
+
+| Current simplification | Possible extension |
+|---|---|
+| Fixed sensor types | Register new sensor types at runtime; assign uninformative priors until evidence accumulates |
+| Per-type reliability | Hierarchical model: type-level prior + per-device deviation (useful for large fleets) |
+| Binary feedback | Graded verdicts ("mostly correct", "partially triggered"); per-sensor override by operator |
+| No temporal decay | Decay annotation weight as incident age grows; parametric half-life per sensor type |
+| Single premises | Multi-premises federation; shared type-level priors, separate device-level beliefs |
+| Discrete threat levels | Continuous score as posterior expected value `E[T]`; ordinal regression extension |
+
+The model is intentionally minimal. Complexity is added only when evidence from deployment shows it is needed.
 
 ---
 
-## The Core Idea: MACE as a Sensor Fusion Engine
+## The Core Idea: Inference from Disagreeing Sensors
 
-The algorithmic heart of ThreatSense is **MACE** (Multi-Annotator Competence Estimation, Hovy et al. NAACL 2013), a Bayesian model originally designed for crowdsourcing — aggregating noisy human judgements of unknown quality to recover a ground truth label.
+The system models each sensor as a participant that may be **reliable** (its readings reflect reality) or **unreliable** (its readings are noise or systematic bias). Neither is known in advance. The key question on every incident is: *given that these sensors disagree, which ones should we believe?*
 
-The mapping to physical security is exact:
+The answer comes from a Bayesian graphical model. Each sensor carries a prior belief about its own reliability. On each incident, the model jointly infers:
 
-| MACE (Crowdsourcing) | ThreatSense (Physical Security) |
+1. The most probable threat level, given all available sensor readings
+2. For each sensor: how likely is it that *this sensor* is behaving reliably *on this incident*
+
+These two questions are solved simultaneously. The sensor readings that agree with the inferred threat level are judged more reliable; those that disagree are judged less reliable. No rules, no thresholds, no manual weights.
+
+**Sensor reliability as a learned quantity.** Each sensor type has a Beta-distributed reliability prior — `Beta(α, β)` — where `α` accumulates evidence of unreliable behavior and `β` accumulates evidence of reliable behavior. Reference points:
+
+| Prior | Interpretation |
 |---|---|
-| Worker `j` | Sensor type `j` (camera, mic, badge reader…) |
-| Item `i` | Active incident `i` |
-| Annotation `A[i,j]` | Sensor `j`'s discretized threat reading for incident `i` |
-| True label `T[i]` | Latent threat level for incident `i` |
-| Spammer probability `θ[j]` | Sensor `j`'s base false-alarm rate |
-| Spammer preference `φ[j]` | Sensor `j`'s bias direction when unreliable |
-| Missing annotation | Sensor offline or not in the zone |
+| `Beta(1, 9)` — mean 10% spammer | Highly reliable; rarely disagrees with ground truth |
+| `Beta(5, 5)` — mean 50% spammer | Unknown; neutral cold-start for a new sensor |
+| `Beta(9, 1)` — mean 90% spammer | Highly unreliable; almost always disagrees |
 
-### Why this model fits so well
+After each incident and operator verdict, these priors are updated. The changes are small per incident but compound over hundreds of incidents into a precise, evidence-based reliability profile for every sensor in the facility.
 
-- **Sparse observations are first-class.** Not every sensor sees every incident. MACE handles missing annotations naturally — they simply don't contribute to the posterior.
-- **Conflicting signals are resolved probabilistically.** If three sensors say HIGH and one says CLEAR, MACE doesn't average them. It infers that the outlier is probably unreliable for this incident, without requiring anyone to configure that rule.
-- **Reliability is latent, not declared.** `θ[j]` is inferred from evidence, not set at installation time. A sensor that consistently disagrees with the consensus accumulates evidence of unreliability in its Beta prior.
+### The consensus property
 
-### Model structure
+A critical emergent behavior: **sensors that repeatedly agree with the eventual ground truth become more trusted, while sensors that repeatedly disagree become less trusted — without the system being told which is which in advance.**
 
-```
-θ[j] ~ Beta(α_j, β_j)           spammer probability for sensor j
-φ[j] ~ Dirichlet(ψ_j)           label bias when spamming
+Concretely: if a camera and a microphone both report HIGH on 50 incidents that operators later confirm as TRUE\_ALARM, and a badge reader reports LOW on those same 50 incidents, the model will have accumulated strong evidence that the badge reader is unreliable in that context. Its readings will be given minimal weight in future inferences, automatically, from evidence alone.
 
-For each incident i:
-  T[i] ~ Discrete(1/K, …, 1/K)  true threat level (uniform prior)
+This is not a fixed weighting rule. It is a posterior that updates on every new piece of evidence.
 
-  For each sensor j:
-    S[i,j] ~ Bernoulli(θ[j])    is sensor j spamming on this incident?
+### Sensor reliability is context-dependent
 
-    A[i,j] = T[i]                if S[i,j] = 0  (reliable: copies true label)
-    A[i,j] ~ Discrete(φ[j])     if S[i,j] = 1  (spamming: random from bias)
-```
+A sensor that is reliable in one context may be unreliable in another. The model tracks this naturally because reliability is inferred per-incident, not computed globally in isolation.
 
-Inference is performed with **Variational Message Passing** (VMP) via Infer.NET, which iteratively refines beliefs until convergence. In the online setting (`numItems = 1`), this typically converges in 5–15 iterations, taking 300–800 ms per incident update on current hardware.
+**Example:** Consider an acoustic sensor (microphone) in two contexts:
+
+*In a quiet server room*, the microphone correctly detects glass-break events and agrees with the camera CV on every incident over three months. Its `β` grows steadily. It becomes one of the most trusted sensors in that zone — mean spammer probability < 5%.
+
+*In a public lobby during business hours*, the same microphone model is installed next to an HVAC duct. It triggers repeatedly on ventilation noise. Cameras and door sensors consistently disagree with it. Its `α` grows across dozens of false alarms. In that zone, it accumulates a mean spammer probability > 70%. The system effectively mutes it in the lobby while still trusting the identical model in the server room.
+
+No one configured this distinction. No one wrote a rule. The system learned it from the pattern of disagreements and operator verdicts across two different deployment contexts.
+
+This is the property that makes MACE suitable for long-running deployed systems: the model gets better at every facility it is deployed in, and improves throughout its operational lifetime.
 
 ---
 
@@ -224,17 +219,33 @@ Groups sensor events into incidents using a **temporal-spatial window**: events 
 
 ---
 
+### Adding New Sensor Types
+
+The system is designed to accommodate new sensor types without code changes to the inference engine.
+
+**Steps to add a new sensor type** (e.g. thermal camera, radar, or LiDAR):
+
+1. Register the sensor type in the Sensor Gateway with a discretization function (how do raw scores map to 0–4?) and an initial prior — `Beta(1, 9)` if the hardware is well-characterized and known to be accurate, `Beta(5, 5)` if unknown.
+2. Extend the annotation vector length from 7 to 8 (or however many types now exist). All existing inferences pass `-1` for the new slot; the model treats absence as missing data and is unaffected.
+3. As incidents accumulate, the new sensor's prior updates from evidence like any other.
+
+New sensors start at 50% reliability (neutral prior) and earn trust — or lose it — purely from their record. There is no privileged position for any sensor type. A cheap door sensor that consistently agrees with outcomes can become more trusted than an expensive CV system that fires on shadows.
+
+The only constraint: the number of sensor types must be fixed per deployment and known at pod startup (it determines the size of the compiled factor graph). Changing it requires a pod restart with a new configuration. Dynamic hot-addition of sensor types is a future extension.
+
+---
+
 ### MACE Inference Service
 
-The stateless gRPC pod that runs VMP inference. Design decisions worth explaining:
+The stateless gRPC pod that runs the Bayesian inference. Design decisions worth explaining:
 
 **Stateless by design.** Every call receives all the data it needs: the annotation vector and the current Beta/Dirichlet priors loaded by the caller from the Belief Store. The pod stores nothing between calls. This means it can be scaled horizontally, restarted without data loss, and tested with synthetic inputs without a database connection.
 
-**Thread-safety via object pool.** Infer.NET's inference engine mutates internal state and is not thread-safe. Rather than one engine per request (expensive — factor graph compilation takes ~1–3 s), a fixed pool of pre-warmed engines is maintained. Each concurrent request borrows an engine from the pool exclusively, uses it, and returns it. Pool depth = maximum concurrent incidents the pod can serve.
+**Concurrent requests via an engine pool.** Inference is CPU-intensive and not safely shareable across concurrent calls. A fixed pool of pre-warmed inference engines is maintained at startup. Each request borrows one exclusively, uses it, and returns it. Pool depth = maximum concurrent incidents the pod can serve simultaneously.
 
-**Pool saturation is graceful.** When all engines are busy and a new request cannot acquire one within the configured timeout (default 5 s), the pod returns gRPC `UNAVAILABLE`. Callers can retry; no crash, no data corruption.
+**Pool saturation is graceful.** When all engines are busy, new requests queue. If a slot is not available within the configured timeout (default 5 s), the pod returns `UNAVAILABLE`. Callers can retry; no crash, no data corruption, no stale state.
 
-**Warm-starting.** When the same incident is re-inferred as new sensors fire, the `t_dist` from the previous call can be passed back as `warm_start`. VMP initialises from this posterior rather than a random point, typically reducing wall time by 2–4× on the second and subsequent calls.
+**Warm-starting.** When the same incident is re-inferred as new sensors fire, the probability distribution from the previous call can be passed back as a starting point. The inference algorithm converges faster when initialized near the previous answer, typically reducing wall time by 2–4×.
 
 **What the pod deliberately does not do:** connect to any database, manage incident state, discretize sensor readings, or trigger alerts. These are all upstream/downstream concerns. The pod's contract is: *given annotations and priors, return posteriors*.
 
@@ -277,37 +288,58 @@ The Belief Store also maintains a **posterior snapshot log** — an append-only 
 
 ## System Behavior: A Walk-Through Scenario
 
-*02:30 AM. Financial office building. The scenario unfolds over 90 seconds.*
+*02:30 AM. Financial office building. This scenario illustrates both real-time threat scoring and the long-term evolution of sensor reliability.*
 
-**Step 1 — First signal** (badge reader + time context only)
-- Badge reader: LOW (unusual access hour)
-- Time context: HIGH (late night)
-- Result: threat=HIGH, confidence=52%, entropy=1.10 — *Watch and wait*
+### The incident (90 seconds)
 
-MACE already questions both sensors (badge reader: 69% spammer, time context: 52%) because each alone is weak evidence. The model correctly refuses to commit with only 2 of 7 sensors.
+**Step 1 — First signal** *(badge reader + time context only)*
+- Badge: LOW (unusual access hour) · Time context: HIGH (02:30 AM)
+- Result: threat=HIGH, confidence=**52%**, entropy=1.10 — *Watch and wait*
 
-**Step 2 — Escalation** (camera and microphone fire)
-- Camera: HIGH; Microphone: MEDIUM; Door sensor: LOW
-- Result: threat=HIGH, confidence=72%, entropy=0.75 — *Alert operator*
+With only 2 of 7 sensors present, and both individually weak evidence, the system correctly refuses to commit. Badge reader is already flagged 69% likely-unreliable; time context 52%. Both are questioned by the model because neither alone is sufficient to triangulate a true threat.
 
-Camera and time context agree on HIGH; microphone reports MEDIUM. MACE marks the microphone as 94% likely-spamming for this incident — it disagrees with the consensus and is down-weighted automatically.
+**Step 2 — Escalation** *(camera and microphone fire)*
+- Camera: HIGH · Microphone: MEDIUM · Door sensor: LOW
+- Result: threat=HIGH, confidence=**72%**, entropy=0.75 — *Alert operator*
+
+Camera and time context agree on HIGH. The microphone reported MEDIUM — one level below the consensus. MACE immediately marks the microphone as **94% likely-spamming on this incident**: it disagrees with the majority, so its reading is down-weighted. The door sensor reported LOW (missed the threat) and is similarly discounted. The alert fires.
 
 **Step 3 — Operator confirms TRUE\_ALARM**
-Camera's `β` increases (correctly flagged, reliably); microphone's `β` barely increases (flagged but was judged unreliable). Door sensor's `α` increases (missed the threat). These updates carry forward to all future incidents.
 
-**Step 4 — Adjacent zone: glass break**
-- Camera: CRITICAL; Glass-break detector: CRITICAL; Microphone: HIGH
-- Result: threat=CRITICAL, confidence=78%, entropy=0.53 — *Dispatch immediately*
+After the operator verdict, priors update:
+- Camera `β` increases significantly — it correctly flagged HIGH with low spammer probability
+- Microphone `β` barely increases — it flagged the threat (annotation ≥ MEDIUM) but was judged 94% spammer, so it receives almost no credit
+- Door sensor `α` increases — it missed the threat entirely
 
-Camera and glass-break agree on CRITICAL; microphone reports HIGH. Microphone is again discounted for under-reading. The posterior is decisive despite the disagreement.
+**Step 4 — Adjacent zone: glass break** *(separate incident)*
+- Camera: CRITICAL · Glass-break detector: CRITICAL · Microphone: HIGH
+- Result: threat=CRITICAL, confidence=**78%**, entropy=0.53 — *Dispatch immediately*
 
-**Step 5 — All-clear sweep** (security has cleared the area)
-- Camera: CLEAR; Microphone: CLEAR; Door: CLEAR; Time context: HIGH (still 02:30)
-- Result: threat=CLEAR, confidence=99.96%, entropy=0.003
+Camera and glass-break agree on CRITICAL; microphone under-reports at HIGH. Microphone is discounted again. Despite the disagreement, the posterior is decisive.
 
-Three trusted sensors agree on CLEAR. Time context (still insisting HIGH) is judged 99.97% spammer and overridden. The system stands down with near-certainty.
+**Step 5 — All-clear sweep** *(security has cleared the corridor)*
+- Camera: CLEAR · Microphone: CLEAR · Door: CLEAR · Time context: HIGH (still 02:30)
+- Result: threat=CLEAR, confidence=**99.96%**, entropy=0.003
 
-**The key insight from this scenario:** MACE's self-consistency property means that sensors which agree with the eventual consensus gain reliability, while sensors that consistently disagree lose it — regardless of whether we know the ground truth in advance.
+Three now-trusted physical sensors agree on CLEAR. Time context insists HIGH. The model judges time context **99.97% spammer** for this incident — it structurally disagrees with the authoritative physical sensors — and overrides it. The system stands down.
+
+---
+
+### What changes over months of operation
+
+The more interesting story is what happens to sensor priors across hundreds of incidents.
+
+**The microphone's reliability history in the north corridor:**
+
+After 3 months and ~120 incidents, the north corridor microphone has a pattern: on clear-cut alarms confirmed by cameras, it consistently reports one level below the camera. Operators always confirm TRUE\_ALARM. Each time, the microphone is judged a low-credit participant — it flagged something, but disagreed with the consensus level. Its `β` grows slowly, `α` never declines much. After 120 incidents its mean spammer probability settles around **35%** — the system has learned that this microphone *tends to under-read*, but is not completely dismissed.
+
+**The same microphone model in the server room:**
+
+In the server room — a quiet, carpeted space — the same microphone model accurately detects glass-break and forced-door events, agreeing with the camera and glass-break sensor every time. After 120 incidents its mean spammer probability settles around **8%**. It is one of the most trusted sensors in that zone.
+
+**Nobody configured this difference.** No one wrote a rule that "the lobby mic is less reliable than the server room mic." The system inferred it from the pattern of agreements and disagreements across incidents in each zone, cross-validated by operator verdicts.
+
+**Adding a new sensor type** (say, a thermal camera) is straightforward: register it with a neutral prior `Beta(5, 5)` — 50% assumed spammer — and it immediately participates in inference. Its weight starts low, reflecting genuine uncertainty. Within 20–30 confirmed incidents it will have accumulated enough evidence to settle into a reliable prior, either trusted or discounted, based purely on how well its readings correlate with eventual outcomes.
 
 ---
 
@@ -360,4 +392,4 @@ The built components constitute the **inference core** of ThreatSense — the mo
 
 ---
 
-*Built on Infer.NET / Microsoft.ML.Probabilistic 0.4. Bayesian model: Hovy et al. "Learning Whom to Trust with MACE," NAACL 2013.*
+*Bayesian model: Hovy et al. "Learning Whom to Trust with MACE," NAACL 2013.*
