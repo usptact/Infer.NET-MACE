@@ -97,7 +97,7 @@ class DirichletParams(BaseModel):
 
 class InferRequest(BaseModel):
     incident_id: str = Field("test-001", description="Caller-defined incident identifier")
-    annotations: List[int] = Field(
+    sensor_readings: List[int] = Field(
         ...,
         description=(
             "One entry per sensor type in fixed order. "
@@ -115,7 +115,7 @@ class InferRequest(BaseModel):
     warm_start: Optional[List[float]] = Field(
         None,
         description=(
-            "t_dist from a previous /infer call on the same incident. "
+            "threat_dist from a previous /infer call on the same incident. "
             "Omit on first call; supply on subsequent calls for faster VMP convergence."
         )
     )
@@ -123,14 +123,14 @@ class InferRequest(BaseModel):
 
 class SensorReliabilityItem(BaseModel):
     sensor_type_index: int
-    annotation:        int
-    spammer_prob:      float
+    sensor_reading:    int
+    fault_prob:        float
     reliability:       float
 
 
 class InferResponse(BaseModel):
     incident_id:        str
-    t_dist:             List[float]
+    threat_dist:        List[float]
     threat_level:       int
     confidence:         float
     entropy:            float
@@ -141,8 +141,8 @@ class InferResponse(BaseModel):
 
 class SensorPriorUpdate(BaseModel):
     sensor_type_index: int
-    annotation:        int   = Field(..., description="-1 if sensor was absent")
-    spammer_prob_mean: float = Field(..., ge=0, le=1)
+    sensor_reading:    int   = Field(..., description="-1 if sensor was absent")
+    fault_prob_mean:   float = Field(..., ge=0, le=1)
     current_theta:     BetaParams
 
 
@@ -178,13 +178,13 @@ async def infer(req: InferRequest):
     """
     Run VMP inference for one active incident.
 
-    Pass the current sensor priors (from your Belief Store) and the annotation
-    vector for the incident. Optionally supply `warm_start` from a previous
+    Pass the current sensor priors (from your Belief Store) and the sensor
+    readings for the incident. Optionally supply `warm_start` from a previous
     call on the same incident to reduce VMP iterations.
     """
     grpc_req = pb2.InferRequest(
         incident_id=req.incident_id,
-        annotations=req.annotations,
+        sensor_readings=req.sensor_readings,
         theta_priors=[pb2.BetaParams(alpha=t.alpha, beta=t.beta)
                       for t in req.theta_priors],
         phi_priors=[pb2.DirichletParams(pseudocounts=p.pseudocounts)
@@ -199,15 +199,15 @@ async def infer(req: InferRequest):
 
     return InferResponse(
         incident_id=resp.incident_id,
-        t_dist=list(resp.t_dist),
+        threat_dist=list(resp.threat_dist),
         threat_level=resp.threat_level,
         confidence=resp.confidence,
         entropy=resp.entropy,
         sensor_reliability=[
             SensorReliabilityItem(
                 sensor_type_index=sr.sensor_type_index,
-                annotation=sr.annotation,
-                spammer_prob=sr.spammer_prob,
+                sensor_reading=sr.sensor_reading,
+                fault_prob=sr.fault_prob,
                 reliability=sr.reliability,
             )
             for sr in resp.sensor_reliability
@@ -222,7 +222,7 @@ async def update_priors(req: UpdatePriorsRequest):
     """
     Compute updated Beta priors after an operator verdict.
 
-    Does not use Infer.NET — pure arithmetic. Supply the spammer posteriors
+    Does not use Infer.NET — pure arithmetic. Supply the fault posteriors
     from the most recent `/infer` response for the closed incident.
     """
     grpc_req = pb2.UpdatePriorsRequest(
@@ -231,8 +231,8 @@ async def update_priors(req: UpdatePriorsRequest):
         sensors=[
             pb2.SensorPriorUpdate(
                 sensor_type_index=s.sensor_type_index,
-                annotation=s.annotation,
-                spammer_prob_mean=s.spammer_prob_mean,
+                sensor_reading=s.sensor_reading,
+                fault_prob_mean=s.fault_prob_mean,
                 current_theta=pb2.BetaParams(
                     alpha=s.current_theta.alpha,
                     beta=s.current_theta.beta,

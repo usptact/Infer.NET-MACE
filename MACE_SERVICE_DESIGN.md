@@ -63,7 +63,7 @@ public MACETrain(int numSensorTypes, int numThreatLevels)
 
 ```csharp
 public OnlineInferenceResult InferOnline(
-    int[] annotations,           // length == numSensorTypes; -1 = absent
+    int[] sensorReadings,        // length == numSensorTypes; -1 = absent
     ModelData priors,
     Discrete? warmStart = null)
 ```
@@ -117,7 +117,6 @@ Removed `<None Include="sample_data.txt" .../>` — test data no longer copied i
 
 Single source of truth for the gRPC interface. Three RPCs:
 
-> **Naming note.** Proto field names (`theta_priors`, `phi_priors`, `t_dist`, `spammer_prob`, `spammer_prob_mean`) retain the original MACE crowdsourcing vocabulary. Internal C# symbols have been renamed to domain terms (`ThreatDist`, `FaultDist`, `faultProbMean`, etc.), but the wire format is unchanged to preserve backward compatibility with existing callers. A proto-layer rename is deferred as a separate breaking-change commit.
 
 | RPC | Path | Notes |
 |---|---|---|
@@ -176,7 +175,7 @@ Implements the three RPCs. Notable design points:
 
 **Validation order in `Infer`:** lengths → Beta positivity → Dirichlet positivity → warm-start length. Invalid inputs return `INVALID_ARGUMENT` before acquiring a pool slot.
 
-**Fallback path for insufficient sensors:** When fewer than `MinSensorsForInference` sensors contributed, MACE VMP has too little information to be meaningful. The pod returns the max observed annotation as `threat_level` with a uniform (maximum-entropy) `t_dist` and increments `mace_infer_requests_total{status="fallback"}`.
+**Fallback path for insufficient sensors:** When fewer than `MinSensorsForInference` sensors contributed, MACE VMP has too little information to be meaningful. The pod returns the max sensor reading as `threat_level` with a uniform (maximum-entropy) `threat_dist` and increments `mace_infer_requests_total{status="fallback"}`.
 
 ---
 
@@ -225,7 +224,7 @@ grpcurl -plaintext localhost:8080 mace.MaceInference/Health
 # Inference: camera=HIGH(3), mic=HIGH(3), badge=MEDIUM(2), time=CLEAR(0)
 grpcurl -plaintext -d '{
   "incident_id": "test-001",
-  "annotations": [3,3,-1,-1,2,-1,0],
+  "sensor_readings": [3,3,-1,-1,2,-1,0],
   "theta_priors": [
     {"alpha":1,"beta":9},{"alpha":1,"beta":9},{"alpha":5,"beta":5},
     {"alpha":5,"beta":5},{"alpha":2,"beta":8},{"alpha":5,"beta":5},
@@ -245,9 +244,9 @@ grpcurl -plaintext -d '{
   "verdict": "TRUE_ALARM",
   "learning_rate": 0.5,
   "sensors": [
-    {"sensor_type_index":0,"annotation":3,"spammer_prob_mean":0.09,
+    {"sensor_type_index":0,"sensor_reading":3,"fault_prob_mean":0.09,
      "current_theta":{"alpha":1,"beta":9}},
-    {"sensor_type_index":1,"annotation":3,"spammer_prob_mean":0.12,
+    {"sensor_type_index":1,"sensor_reading":3,"fault_prob_mean":0.12,
      "current_theta":{"alpha":1,"beta":9}}
   ]
 }' localhost:8080 mace.MaceInference/UpdatePriors

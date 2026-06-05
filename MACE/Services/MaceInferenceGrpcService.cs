@@ -71,7 +71,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
     {
         ValidateInferRequest(request);
 
-        int numObs = request.Annotations.Count(a => a != -1);
+        int numObs = request.SensorReadings.Count(a => a != -1);
 
         // DEBUG: log full request contents before any processing
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -81,7 +81,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         // ── Insufficient observations → raw-max fallback ──────────────────────
         if (numObs < _opts.MinSensorsForInference)
         {
-            int maxAnn = request.Annotations.Where(a => a >= 0).DefaultIfEmpty(0).Max();
+            int maxAnn = request.SensorReadings.Where(a => a >= 0).DefaultIfEmpty(0).Max();
             _logger.LogWarning(
                 "Infer  incident={Id}  obs={Obs}/{Total} < min={Min}  →  fallback  " +
                 "max-ann={MaxAnn}  level={Level}",
@@ -136,7 +136,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             {
                 var sw = Stopwatch.StartNew();
                 result    = lease.Inferencer.InferOnline(
-                    request.Annotations.ToArray(), priors, warmStart);
+                    request.SensorReadings.ToArray(), priors, warmStart);
                 elapsedMs = sw.ElapsedMilliseconds;
             }
         }
@@ -200,7 +200,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         {
             var current = new BetaParameters(sensor.CurrentTheta.Alpha, sensor.CurrentTheta.Beta);
             var updated = _priorUpdate.UpdateTheta(
-                current, sensor.SpammerProbMean, sensor.Annotation, verdict, lr);
+                current, sensor.FaultProbMean, sensor.SensorReading, verdict, lr);
 
             response.UpdatedThetas.Add(new UpdatedTheta
             {
@@ -254,9 +254,9 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
 
     private void ValidateInferRequest(InferRequest req)
     {
-        if (req.Annotations.Count != _opts.NumSensorTypes)
+        if (req.SensorReadings.Count != _opts.NumSensorTypes)
             throw new RpcException(new Status(StatusCode.InvalidArgument,
-                $"annotations must have {_opts.NumSensorTypes} elements, got {req.Annotations.Count}."));
+                $"sensor_readings must have {_opts.NumSensorTypes} elements, got {req.SensorReadings.Count}."));
 
         if (req.ThetaPriors.Count != _opts.NumSensorTypes)
             throw new RpcException(new Status(StatusCode.InvalidArgument,
@@ -312,16 +312,16 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             NumObservations = numObs,
             InferenceMs     = ms
         };
-        resp.TDist.AddRange(result.ThreatDist.GetProbs().ToArray());
-        for (int j = 0; j < req.Annotations.Count; j++)
+        resp.ThreatDist.AddRange(result.ThreatDist.GetProbs().ToArray());
+        for (int j = 0; j < req.SensorReadings.Count; j++)
         {
-            if (req.Annotations[j] == -1) continue;
+            if (req.SensorReadings[j] == -1) continue;
             double sp = result.FaultDist[j].GetProbTrue();
             resp.SensorReliability.Add(new SensorReliability
             {
                 SensorTypeIndex = j,
-                Annotation      = req.Annotations[j],
-                SpammerProb     = sp,
+                SensorReading   = req.SensorReadings[j],
+                FaultProb       = sp,
                 Reliability     = 1.0 - sp
             });
         }
@@ -341,7 +341,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             NumObservations = numObs,
             InferenceMs     = 0
         };
-        resp.TDist.AddRange(Enumerable.Repeat(uniform, _opts.NumThreatLevels));
+        resp.ThreatDist.AddRange(Enumerable.Repeat(uniform, _opts.NumThreatLevels));
         return resp;
     }
 
@@ -353,7 +353,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
     {
         var sb = new StringBuilder();
         sb.AppendLine($"  incident_id  : {req.IncidentId}");
-        sb.AppendLine($"  annotations  : [{string.Join(", ", req.Annotations)}]  ({numObs} of {req.Annotations.Count} sensors present)");
+        sb.AppendLine($"  sensor_readings : [{string.Join(", ", req.SensorReadings)}]  ({numObs} of {req.SensorReadings.Count} sensors present)");
 
         var thetaParts = req.ThetaPriors.Select(t => $"α={t.Alpha:F1}/β={t.Beta:F1}");
         sb.AppendLine($"  theta_priors : [{string.Join("  ", thetaParts)}]");
@@ -391,11 +391,11 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
     {
         var sb = new StringBuilder();
         sb.AppendLine("  t_dist :");
-        for (int i = 0; i < resp.TDist.Count; i++)
+        for (int i = 0; i < resp.ThreatDist.Count; i++)
         {
             string label  = i < ThreatLevelNames.Length ? ThreatLevelNames[i] : $"L{i}";
             string marker = i == resp.ThreatLevel ? " ← argmax" : string.Empty;
-            sb.AppendLine($"    {label,-8} = {resp.TDist[i]:F4}{marker}");
+            sb.AppendLine($"    {label,-8} = {resp.ThreatDist[i]:F4}{marker}");
         }
 
         if (resp.SensorReliability.Count > 0)
@@ -403,8 +403,8 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             sb.AppendLine("  sensors :");
             foreach (var sr in resp.SensorReliability)
                 sb.AppendLine(
-                    $"    [{sr.SensorTypeIndex}]  ann={sr.Annotation}  " +
-                    $"spammer={sr.SpammerProb:F3}  reliable={sr.Reliability:F3}");
+                    $"    [{sr.SensorTypeIndex}]  reading={sr.SensorReading}  " +
+                    $"fault={sr.FaultProb:F3}  reliable={sr.Reliability:F3}");
         }
 
         sb.Append($"  elapsed : {resp.InferenceMs}ms");
@@ -435,11 +435,11 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             {
                 status = "unknown";
             }
-            else if (src.Annotation == -1)
+            else if (src.SensorReading == -1)
             {
                 status = "absent — no change";
             }
-            else if (src.Annotation >= 2)
+            else if (src.SensorReading >= 2)
             {
                 status = req.Verdict == "TRUE_ALARM" ? "flagged correctly, reinforced" : "false alarm contributor";
             }

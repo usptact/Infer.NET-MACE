@@ -117,7 +117,7 @@ curl -s -X POST http://localhost:8000/infer \
   -H "Content-Type: application/json" \
   -d '{
     "incident_id": "lobby-001",
-    "annotations": [3, 3, -1, -1, 2, -1, 0],
+    "sensor_readings": [3, 3, -1, -1, 2, -1, 0],
     "theta_priors": [
       {"alpha":1,"beta":9}, {"alpha":1,"beta":9}, {"alpha":5,"beta":5},
       {"alpha":5,"beta":5}, {"alpha":2,"beta":8}, {"alpha":5,"beta":5},
@@ -208,23 +208,23 @@ Called by the Incident Manager each time an annotation vector is updated (typica
 | Field | Type | Description |
 |---|---|---|
 | `incident_id` | string | Caller-defined incident identifier |
-| `annotations` | int32[] | One entry per sensor type; -1 = absent. Length must equal `NumSensorTypes`. |
+| `sensor_readings` | int32[] | One entry per sensor type; -1 = absent. Length must equal `NumSensorTypes`. |
 | `theta_priors` | BetaParams[] | Current `θ` prior per sensor type |
 | `phi_priors` | DirichletParams[] | Current `φ` prior per sensor type |
-| `warm_start` | double[] | Optional: `t_dist` from a previous call on the same incident |
+| `warm_start` | double[] | Optional: `threat_dist` from a previous call on the same incident |
 
 **Key response fields:**
 
 | Field | Type | Description |
 |---|---|---|
-| `t_dist` | double[] | Full posterior `P(CLEAR…CRITICAL \| evidence)` |
-| `threat_level` | int32 | `argmax(t_dist)` |
-| `confidence` | double | `max(t_dist)` |
+| `threat_dist` | double[] | Full posterior `P(CLEAR…CRITICAL \| evidence)` |
+| `threat_level` | int32 | `argmax(threat_dist)` |
+| `confidence` | double | `max(threat_dist)` |
 | `entropy` | double | Shannon entropy (uncertainty measure) |
 | `sensor_reliability` | SensorReliability[] | Per-sensor fault probability and reliability score |
 | `inference_ms` | int64 | VMP wall-clock time |
 
-**Warm-start:** On the second and subsequent calls for the same incident, pass the previous `t_dist` as `warm_start`. VMP initialises from that distribution instead of random, typically halving the iteration count.
+**Warm-start:** On the second and subsequent calls for the same incident, pass the previous `threat_dist` as `warm_start`. VMP initialises from that distribution instead of random, typically halving the iteration count.
 
 ---
 
@@ -259,7 +259,7 @@ grpcurl -plaintext localhost:8080 mace.MaceInference/Health
 # Inference (provide a JSON file or inline)
 grpcurl -plaintext -d '{
   "incident_id": "test-001",
-  "annotations": [3,3,-1,-1,2,-1,0],
+  "sensor_readings": [3,3,-1,-1,2,-1,0],
   "theta_priors": [
     {"alpha":1,"beta":9},{"alpha":1,"beta":9},{"alpha":5,"beta":5},
     {"alpha":5,"beta":5},{"alpha":2,"beta":8},{"alpha":5,"beta":5},

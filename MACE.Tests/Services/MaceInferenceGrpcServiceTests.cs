@@ -93,11 +93,11 @@ public sealed class GrpcServiceFixture : IDisposable
     public static ServerCallContext Ctx() =>
         new Mock<ServerCallContext>().Object;
 
-    /// A fully valid InferRequest with the given annotations.
-    public static InferRequest ValidInferRequest(int[] annotations, double[]? warmStart = null)
+    /// A fully valid InferRequest with the given sensor readings.
+    public static InferRequest ValidInferRequest(int[] sensorReadings, double[]? warmStart = null)
     {
         var req = new InferRequest { IncidentId = "test-inc" };
-        req.Annotations.AddRange(annotations);
+        req.SensorReadings.AddRange(sensorReadings);
 
         for (int i = 0; i < NumSensorTypes; i++)
         {
@@ -231,7 +231,7 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
     // The service returns before touching the pool, so the idle mock is fine.
 
     [Fact]
-    public async Task Infer_BelowMinSensors_ReturnsUniformTDist()
+    public async Task Infer_BelowMinSensors_ReturnsUniformThreatDist()
     {
         // Only 1 annotation present when min is 2 → fallback
         var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
@@ -239,10 +239,10 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
 
         var resp = await svc.Infer(req, GrpcServiceFixture.Ctx());
 
-        resp.TDist.Should().HaveCount(GrpcServiceFixture.NumThreatLevels);
+        resp.ThreatDist.Should().HaveCount(GrpcServiceFixture.NumThreatLevels);
         // Fallback distributes probability uniformly
         var expected = 1.0 / GrpcServiceFixture.NumThreatLevels;
-        resp.TDist.Should().AllSatisfy(p => p.Should().BeApproximately(expected, 1e-10));
+        resp.ThreatDist.Should().AllSatisfy(p => p.Should().BeApproximately(expected, 1e-10));
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
     }
 
     [Fact]
-    public async Task Infer_BelowMinSensors_ThreatLevelIsMaxAnnotation()
+    public async Task Infer_BelowMinSensors_ThreatLevelIsMaxSensorReading()
     {
         var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
         // Only sensor 0 fires with label 3
@@ -295,14 +295,14 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
     // ── Infer: happy path (real inference) ────────────────────────────────────
 
     [Fact]
-    public async Task Infer_ValidRequest_TDistSumsToOne()
+    public async Task Infer_ValidRequest_ThreatDistSumsToOne()
     {
         var svc = _fx.BuildService(_fx.WorkingPool().Object);
         var req = GrpcServiceFixture.ValidInferRequest([3, 3, 3]);
 
         var resp = await svc.Infer(req, GrpcServiceFixture.Ctx());
 
-        resp.TDist.Sum().Should().BeApproximately(1.0, precision: 1e-6);
+        resp.ThreatDist.Sum().Should().BeApproximately(1.0, precision: 1e-6);
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
         var resp = await svc.Infer(req, GrpcServiceFixture.Ctx());
 
         resp.SensorReliability.Should().HaveCount(2); // sensors 0 and 1
-        resp.SensorReliability.Should().NotContain(sr => sr.Annotation == -1);
+        resp.SensorReliability.Should().NotContain(sr => sr.SensorReading == -1);
     }
 
     [Fact]
@@ -350,7 +350,7 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
         var req = new UpdatePriorsRequest { Verdict = "MAYBE_ALARM", LearningRate = 0.5 };
         req.Sensors.Add(new SensorPriorUpdate
         {
-            SensorTypeIndex = 0, Annotation = 3, SpammerProbMean = 0.1,
+            SensorTypeIndex = 0, SensorReading = 3, FaultProbMean = 0.1,
             CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
         });
 
@@ -368,12 +368,12 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
         var req = new UpdatePriorsRequest { Verdict = verdict, LearningRate = 0.5 };
         req.Sensors.Add(new SensorPriorUpdate
         {
-            SensorTypeIndex = 0, Annotation = 3, SpammerProbMean = 0.1,
+            SensorTypeIndex = 0, SensorReading = 3, FaultProbMean = 0.1,
             CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
         });
         req.Sensors.Add(new SensorPriorUpdate
         {
-            SensorTypeIndex = 1, Annotation = 3, SpammerProbMean = 0.1,
+            SensorTypeIndex = 1, SensorReading = 3, FaultProbMean = 0.1,
             CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
         });
 
@@ -390,7 +390,7 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
         var req = new UpdatePriorsRequest { Verdict = "TRUE_ALARM", LearningRate = 0 };
         req.Sensors.Add(new SensorPriorUpdate
         {
-            SensorTypeIndex = 0, Annotation = 3, SpammerProbMean = 0.1,
+            SensorTypeIndex = 0, SensorReading = 3, FaultProbMean = 0.1,
             CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
         });
 

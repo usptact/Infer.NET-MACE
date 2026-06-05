@@ -10,7 +10,7 @@ option csharp_namespace = "MACE.Protos";
 
 service MaceInference {
   // Hot path: run VMP inference for a single active incident.
-  // Priors and annotations arrive per-request; pod is fully stateless.
+  // Priors and sensor readings arrive per-request; pod is fully stateless.
   rpc Infer (InferRequest) returns (InferResponse);
 
   // Cold path: compute updated Beta priors after an operator verdict.
@@ -31,16 +31,16 @@ message BetaParams {
 }
 
 message DirichletParams {
-  repeated double pseudocounts = 1;   // length == NumCategories
+  repeated double pseudocounts = 1;   // length == NumThreatLevels
 }
 
 message InferRequest {
   string  incident_id = 1;
 
-  // Discretized sensor assessments for this incident.
+  // Discretized sensor readings for this incident.
   // Length must equal NumSensorTypes (server config).
   // -1 = sensor absent / did not observe this incident.
-  repeated int32 annotations = 2;
+  repeated int32 sensor_readings = 2;
 
   // Current θ prior (Beta) for each sensor type, indexed by sensor-type order.
   repeated BetaParams    theta_priors = 3;
@@ -48,7 +48,7 @@ message InferRequest {
   // Current φ prior (Dirichlet) for each sensor type.
   repeated DirichletParams phi_priors = 4;
 
-  // Optional warm-start: T[0] posterior probabilities from a previous Infer
+  // Optional warm-start: threat_dist probabilities from a previous Infer
   // call on the same incident. Omit (leave empty) on the first call.
   // When provided, VMP initialises from this distribution and converges faster.
   repeated double warm_start = 5;
@@ -56,26 +56,26 @@ message InferRequest {
 
 message SensorReliability {
   int32  sensor_type_index = 1;
-  int32  annotation        = 2;
-  double spammer_prob      = 3;   // mean of S[0][j] Bernoulli posterior
-  double reliability       = 4;   // 1 - spammer_prob
+  int32  sensor_reading    = 2;
+  double fault_prob        = 3;   // mean of S[0][j] fault indicator posterior
+  double reliability       = 4;   // 1 - fault_prob
 }
 
 message InferResponse {
   string incident_id = 1;
 
   // Full posterior distribution over threat levels: P(CLEAR..CRITICAL | evidence).
-  // Length == NumCategories.
-  repeated double t_dist = 2;
+  // Length == NumThreatLevels.
+  repeated double threat_dist = 2;
 
-  int32  threat_level    = 3;   // argmax(t_dist)
-  double confidence      = 4;   // max(t_dist)
-  double entropy         = 5;   // Shannon entropy of t_dist (uncertainty measure)
+  int32  threat_level    = 3;   // argmax(threat_dist)
+  double confidence      = 4;   // max(threat_dist)
+  double entropy         = 5;   // Shannon entropy of threat_dist (uncertainty measure)
 
-  // Only sensors that contributed an annotation (annotation != -1).
+  // Only sensors that contributed a reading (sensor_reading != -1).
   repeated SensorReliability sensor_reliability = 6;
 
-  int32 num_observations = 7;   // count of non-(-1) annotations
+  int32 num_observations = 7;   // count of non-(-1) sensor readings
   int64 inference_ms     = 8;   // VMP wall-clock time in milliseconds
 }
 
@@ -85,8 +85,8 @@ message InferResponse {
 
 message SensorPriorUpdate {
   int32     sensor_type_index  = 1;
-  int32     annotation         = 2;   // -1 if absent
-  double    spammer_prob_mean  = 3;   // S[0][j].GetMean() from a previous Infer call
+  int32     sensor_reading     = 2;   // -1 if absent
+  double    fault_prob_mean    = 3;   // S[0][j].GetMean() from a previous Infer call
   BetaParams current_theta     = 4;
 }
 
