@@ -136,7 +136,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     [Fact]
     public void InitializeLabels_WrongLengthWarmStart_FallsBackToRandomWithoutThrowing()
     {
-        // warmStart.Length (2) != numItems (1) → silent fallback to random init
+        // warmStart.Length (2) != numIncidents (1) → silent fallback to random init
         var wrongLength = new[]
         {
             Discrete.PointMass(3, MACETrainFixture.NumThreatLevels),
@@ -282,7 +282,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     }
 
     // ── InferModelData ────────────────────────────────────────────────────────
-    // The fixture's trainer has numItems=1, so a 1-row data matrix is valid.
+    // The fixture's trainer has numIncidents=1, so a 1-row data matrix is valid.
 
     [Fact]
     public void InferModelData_Null_ThrowsArgumentNullException()
@@ -300,7 +300,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
         Trainer.SetModelData(MACETrainFixture.UniformPriors());
         Trainer.InitializeLabels(1, MACETrainFixture.NumThreatLevels);
 
-        // Model has numItems=1; 2-row matrix is invalid
+        // Model has numIncidents=1; 2-row matrix is invalid
         var act = () => Trainer.InferModelData([[3, 3, 3], [1, 1, 1]]);
         act.Should().Throw<ArgumentException>();
     }
@@ -311,7 +311,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
         Trainer.SetModelData(MACETrainFixture.UniformPriors());
         Trainer.InitializeLabels(1, MACETrainFixture.NumThreatLevels);
 
-        // Model expects 3 workers; 4 annotations per item is invalid
+        // Model expects 3 sensor types; 4 readings per incident is invalid
         var act = () => Trainer.InferModelData([[3, 3, 3, 3]]);
         act.Should().Throw<ArgumentException>();
     }
