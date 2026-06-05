@@ -33,15 +33,15 @@ public sealed class InferencePool : IInferencePool, IDisposable
         _available = new ConcurrentQueue<MACETrain>();
 
         logger.LogInformation(
-            "Warming up pool: {Size} slot(s) × ({Sensors} sensor types, {Cats} categories)",
-            _total, opts.NumSensorTypes, opts.NumCategories);
+            "Warming up pool: {Size} slot(s) × ({Sensors} sensor types, {Levels} threat levels)",
+            _total, opts.NumSensorTypes, opts.NumThreatLevels);
 
         var totalSw = Stopwatch.StartNew();
 
         for (int i = 0; i < _total; i++)
         {
             var slotSw = Stopwatch.StartNew();
-            var trainer = new MACETrain(opts.NumSensorTypes, opts.NumCategories);
+            var trainer = new MACETrain(opts.NumSensorTypes, opts.NumThreatLevels);
             trainer.CreateModel();
             slotSw.Stop();
             _available.Enqueue(trainer);

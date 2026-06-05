@@ -19,14 +19,14 @@ namespace MACE.Tests.Services;
 public sealed class GrpcServiceFixture : IDisposable
 {
     public const int NumSensorTypes = 3;
-    public const int NumCategories  = 5;
+    public const int NumThreatLevels = 5;
     public const int MinSensors     = 2;
 
     public MACETrain Trainer { get; }
 
     public GrpcServiceFixture()
     {
-        Trainer = new MACETrain(NumSensorTypes, NumCategories);
+        Trainer = new MACETrain(NumSensorTypes, NumThreatLevels);
         Trainer.CreateModel();
         // Pre-compile the Infer.NET algorithm.
         Trainer.InferOnline([2, -1, -1], UniformPriors());
@@ -39,7 +39,7 @@ public sealed class GrpcServiceFixture : IDisposable
         var opts = Options.Create(new InferenceOptions
         {
             NumSensorTypes         = NumSensorTypes,
-            NumCategories          = NumCategories,
+            NumThreatLevels          = NumThreatLevels,
             PoolSize               = 1,
             MinSensorsForInference = minSensors,
             PoolAcquireTimeoutMs   = 500
@@ -103,7 +103,7 @@ public sealed class GrpcServiceFixture : IDisposable
         {
             req.ThetaPriors.Add(new BetaParams { Alpha = 1.0, Beta = 9.0 });
             var phi = new DirichletParams();
-            phi.Pseudocounts.AddRange(Enumerable.Repeat(1.0, NumCategories));
+            phi.Pseudocounts.AddRange(Enumerable.Repeat(1.0, NumThreatLevels));
             req.PhiPriors.Add(phi);
         }
 
@@ -239,9 +239,9 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
 
         var resp = await svc.Infer(req, GrpcServiceFixture.Ctx());
 
-        resp.TDist.Should().HaveCount(GrpcServiceFixture.NumCategories);
+        resp.TDist.Should().HaveCount(GrpcServiceFixture.NumThreatLevels);
         // Fallback distributes probability uniformly
-        var expected = 1.0 / GrpcServiceFixture.NumCategories;
+        var expected = 1.0 / GrpcServiceFixture.NumThreatLevels;
         resp.TDist.Should().AllSatisfy(p => p.Should().BeApproximately(expected, 1e-10));
     }
 

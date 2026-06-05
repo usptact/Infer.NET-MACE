@@ -58,9 +58,9 @@ try
     // in the output before the potentially slow CreateModel() calls.
     var opts = app.Services.GetRequiredService<IOptions<InferenceOptions>>().Value;
     startLog.Information(
-        "Config  sensors={Sensors}  categories={Categories}  pool={Pool}  " +
+        "Config  sensors={Sensors}  threat-levels={ThreatLevels}  pool={Pool}  " +
         "min-obs={MinObs}  pool-timeout={TimeoutMs}ms",
-        opts.NumSensorTypes, opts.NumCategories, opts.PoolSize,
+        opts.NumSensorTypes, opts.NumThreatLevels, opts.PoolSize,
         opts.MinSensorsForInference, opts.PoolAcquireTimeoutMs);
 
     // Force the singleton to construct now so the pool is fully warm before

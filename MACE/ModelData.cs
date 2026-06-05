@@ -7,9 +7,9 @@ namespace MACE
     /// Unwraps the batch arrays so callers never index <c>[0]</c> manually.
     /// </summary>
     public record OnlineInferenceResult(
-        Discrete    TDist,       // posterior over threat levels (length = NumCategories)
-        Bernoulli[] SDist,       // spammer posteriors, one per sensor type
-        int         ThreatLevel, // argmax(TDist.GetProbs())
+        Discrete    ThreatDist,  // posterior over threat levels (length = NumThreatLevels)
+        Bernoulli[] FaultDist,   // per-sensor fault indicator posteriors
+        int         ThreatLevel, // argmax(ThreatDist.GetProbs())
         double      Confidence,  // max probability
         double      Entropy      // Shannon entropy (uncertainty measure)
     );
@@ -34,16 +34,17 @@ namespace MACE
         public Dirichlet[] PhiDist { get; set; } = Array.Empty<Dirichlet>();
 
         /// <summary>
-        /// Posterior distributions for true item labels (T).
-        /// Each element represents the Discrete distribution over possible labels for one item.
+        /// Posterior distributions for true threat levels (T).
+        /// Each element represents the Discrete distribution over threat levels for one incident.
         /// </summary>
-        public Discrete[] TDist { get; set; } = Array.Empty<Discrete>();
+        public Discrete[] ThreatDist { get; set; } = Array.Empty<Discrete>();
 
         /// <summary>
-        /// Posterior distributions for worker-item spammer indicators (S).
-        /// SDist[item][worker] gives the Bernoulli distribution for whether the worker is spamming on that item.
+        /// Posterior fault-indicator distributions (S).
+        /// FaultDist[incident][sensor] gives the Bernoulli distribution for whether
+        /// the sensor produced a faulty reading for that incident.
         /// </summary>
-        public Bernoulli[][] SDist { get; set; } = Array.Empty<Bernoulli[]>();
+        public Bernoulli[][] FaultDist { get; set; } = Array.Empty<Bernoulli[]>();
 
         /// <summary>
         /// Initializes a new instance of the ModelData class.

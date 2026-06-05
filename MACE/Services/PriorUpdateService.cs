@@ -33,7 +33,7 @@ public sealed class PriorUpdateService
     /// </param>
     public BetaParameters UpdateTheta(
         BetaParameters current,
-        double spammerProbMean,
+        double faultProbMean,
         int annotation,
         Verdict verdict,
         double learningRate = 0.5)
@@ -49,7 +49,7 @@ public sealed class PriorUpdateService
         {
             if (flaggedThreat)
                 // Sensor correctly flagged → reinforce reliability (increase β)
-                beta  += learningRate * (1.0 - spammerProbMean);
+                beta  += learningRate * (1.0 - faultProbMean);
             else
                 // Sensor missed a real threat → penalise slightly (increase α)
                 alpha += learningRate * 0.3;
@@ -58,7 +58,7 @@ public sealed class PriorUpdateService
         {
             if (flaggedThreat)
                 // Sensor contributed to false alarm → penalise (increase α)
-                alpha += learningRate * spammerProbMean;
+                alpha += learningRate * faultProbMean;
             else
                 // Sensor correctly stayed quiet → reinforce (increase β)
                 beta  += learningRate * 0.3;

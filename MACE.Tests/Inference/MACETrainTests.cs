@@ -15,13 +15,13 @@ namespace MACE.Tests.Inference;
 public sealed class MACETrainFixture : IDisposable
 {
     public const int NumSensorTypes = 3;
-    public const int NumCategories  = 5;
+    public const int NumThreatLevels = 5;
 
     public MACETrain Trainer { get; }
 
     public MACETrainFixture()
     {
-        Trainer = new MACETrain(NumSensorTypes, NumCategories);
+        Trainer = new MACETrain(NumSensorTypes, NumThreatLevels);
         Trainer.CreateModel();
         // Pre-compile so tests run at steady-state speed.
         Trainer.InferOnline([2, -1, -1], UniformPriors());
@@ -98,7 +98,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     public void Constructor_Online_NonPositiveSensorTypes_ThrowsArgumentOutOfRange(
         int sensorTypes)
     {
-        var act = () => new MACETrain(sensorTypes, numCategories: 5);
+        var act = () => new MACETrain(sensorTypes, numThreatLevels: 5);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -116,20 +116,20 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     [Theory]
     [InlineData(0,  5)]
     [InlineData(-1, 5)]
-    public void InitializeLabels_NonPositiveNumItems_ThrowsArgumentOutOfRange(
-        int numItems, int numCategories)
+    public void InitializeLabels_NonPositiveNumIncidents_ThrowsArgumentOutOfRange(
+        int numIncidents, int numThreatLevels)
     {
-        var act = () => Trainer.InitializeLabels(numItems, numCategories);
+        var act = () => Trainer.InitializeLabels(numIncidents, numThreatLevels);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Theory]
     [InlineData(1, 0)]
     [InlineData(1, -1)]
-    public void InitializeLabels_NonPositiveNumCategories_ThrowsArgumentOutOfRange(
-        int numItems, int numCategories)
+    public void InitializeLabels_NonPositiveNumThreatLevels_ThrowsArgumentOutOfRange(
+        int numIncidents, int numThreatLevels)
     {
-        var act = () => Trainer.InitializeLabels(numItems, numCategories);
+        var act = () => Trainer.InitializeLabels(numIncidents, numThreatLevels);
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -139,13 +139,13 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
         // warmStart.Length (2) != numItems (1) → silent fallback to random init
         var wrongLength = new[]
         {
-            Discrete.PointMass(3, MACETrainFixture.NumCategories),
-            Discrete.PointMass(3, MACETrainFixture.NumCategories)
+            Discrete.PointMass(3, MACETrainFixture.NumThreatLevels),
+            Discrete.PointMass(3, MACETrainFixture.NumThreatLevels)
         };
 
         var act = () => Trainer.InitializeLabels(
-            numItems:      1,
-            numCategories: MACETrainFixture.NumCategories,
+            numIncidents:  1,
+            numThreatLevels: MACETrainFixture.NumThreatLevels,
             warmStart:     wrongLength);
 
         act.Should().NotThrow();
@@ -178,28 +178,28 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     // ── InferOnline: output structure ─────────────────────────────────────────
 
     [Fact]
-    public void InferOnline_TDistProbabilitiesSumToOne()
+    public void InferOnline_ThreatDistProbabilitiesSumToOne()
     {
         var result = Trainer.InferOnline([3, 3, 3], MACETrainFixture.UniformPriors());
-        var probs  = result.TDist.GetProbs().ToArray();
+        var probs  = result.ThreatDist.GetProbs().ToArray();
 
         probs.Sum().Should().BeApproximately(1.0, precision: 1e-6);
     }
 
     [Fact]
-    public void InferOnline_ConfidenceEqualsMaxTDistProbability()
+    public void InferOnline_ConfidenceEqualsMaxThreatDistProbability()
     {
         var result = Trainer.InferOnline([3, 3, 3], MACETrainFixture.UniformPriors());
-        var max    = result.TDist.GetProbs().ToArray().Max();
+        var max    = result.ThreatDist.GetProbs().ToArray().Max();
 
         result.Confidence.Should().BeApproximately(max, precision: 1e-10);
     }
 
     [Fact]
-    public void InferOnline_ThreatLevelIsArgmaxOfTDist()
+    public void InferOnline_ThreatLevelIsArgmaxOfThreatDist()
     {
         var result = Trainer.InferOnline([3, 3, 3], MACETrainFixture.UniformPriors());
-        var probs  = result.TDist.GetProbs().ToArray();
+        var probs  = result.ThreatDist.GetProbs().ToArray();
         var argmax = Array.IndexOf(probs, probs.Max());
 
         result.ThreatLevel.Should().Be(argmax);
@@ -213,10 +213,10 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     }
 
     [Fact]
-    public void InferOnline_SDistLengthMatchesSensorCount()
+    public void InferOnline_FaultDistLengthMatchesSensorCount()
     {
         var result = Trainer.InferOnline([3, -1, 3], MACETrainFixture.UniformPriors());
-        result.SDist.Should().HaveCount(MACETrainFixture.NumSensorTypes);
+        result.FaultDist.Should().HaveCount(MACETrainFixture.NumSensorTypes);
     }
 
     // ── InferOnline: inference quality ───────────────────────────────────────
@@ -253,7 +253,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     {
         // Only sensor 0 reports MEDIUM(2); others absent
         var result = Trainer.InferOnline([2, -1, -1], MACETrainFixture.UniformPriors());
-        var probs  = result.TDist.GetProbs().ToArray();
+        var probs  = result.ThreatDist.GetProbs().ToArray();
 
         probs.Sum().Should().BeApproximately(1.0, precision: 1e-6);
     }
@@ -263,9 +263,9 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     [Fact]
     public void InferOnline_WithWarmStart_ProducesValidDistribution()
     {
-        var warmStart = Discrete.PointMass(3, MACETrainFixture.NumCategories);
+        var warmStart = Discrete.PointMass(3, MACETrainFixture.NumThreatLevels);
         var result    = Trainer.InferOnline([3, 3, 3], MACETrainFixture.ReliablePriors(), warmStart);
-        var probs     = result.TDist.GetProbs().ToArray();
+        var probs     = result.ThreatDist.GetProbs().ToArray();
 
         probs.Sum().Should().BeApproximately(1.0, precision: 1e-6);
     }
@@ -274,7 +274,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     public void InferOnline_WarmStartBiasedToCorrectLabel_SameThreatLevelAsNoWarmStart()
     {
         // For a strong 3-sensor consensus, warm-start direction shouldn't change the outcome.
-        var warmStart = Discrete.PointMass(3, MACETrainFixture.NumCategories);
+        var warmStart = Discrete.PointMass(3, MACETrainFixture.NumThreatLevels);
         var withWarm    = Trainer.InferOnline([3, 3, 3], MACETrainFixture.ReliablePriors(), warmStart);
         var withoutWarm = Trainer.InferOnline([3, 3, 3], MACETrainFixture.ReliablePriors());
 
@@ -288,7 +288,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     public void InferModelData_Null_ThrowsArgumentNullException()
     {
         Trainer.SetModelData(MACETrainFixture.UniformPriors());
-        Trainer.InitializeLabels(1, MACETrainFixture.NumCategories);
+        Trainer.InitializeLabels(1, MACETrainFixture.NumThreatLevels);
 
         var act = () => Trainer.InferModelData(null!);
         act.Should().Throw<ArgumentNullException>();
@@ -298,7 +298,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     public void InferModelData_WrongItemCount_ThrowsArgumentException()
     {
         Trainer.SetModelData(MACETrainFixture.UniformPriors());
-        Trainer.InitializeLabels(1, MACETrainFixture.NumCategories);
+        Trainer.InitializeLabels(1, MACETrainFixture.NumThreatLevels);
 
         // Model has numItems=1; 2-row matrix is invalid
         var act = () => Trainer.InferModelData([[3, 3, 3], [1, 1, 1]]);
@@ -309,7 +309,7 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     public void InferModelData_WrongWorkerCount_ThrowsArgumentException()
     {
         Trainer.SetModelData(MACETrainFixture.UniformPriors());
-        Trainer.InitializeLabels(1, MACETrainFixture.NumCategories);
+        Trainer.InitializeLabels(1, MACETrainFixture.NumThreatLevels);
 
         // Model expects 3 workers; 4 annotations per item is invalid
         var act = () => Trainer.InferModelData([[3, 3, 3, 3]]);
@@ -320,14 +320,14 @@ public class MACETrainTests : IClassFixture<MACETrainFixture>
     public void InferModelData_ValidData_ReturnsCorrectlyShapedArrays()
     {
         Trainer.SetModelData(MACETrainFixture.UniformPriors());
-        Trainer.InitializeLabels(1, MACETrainFixture.NumCategories);
+        Trainer.InitializeLabels(1, MACETrainFixture.NumThreatLevels);
 
         var result = Trainer.InferModelData([[3, 3, 3]]);
 
-        result.TDist.Should().HaveCount(1);
+        result.ThreatDist.Should().HaveCount(1);
         result.ThetaDist.Should().HaveCount(MACETrainFixture.NumSensorTypes);
         result.PhiDist.Should().HaveCount(MACETrainFixture.NumSensorTypes);
-        result.SDist.Should().HaveCount(1);
-        result.SDist[0].Should().HaveCount(MACETrainFixture.NumSensorTypes);
+        result.FaultDist.Should().HaveCount(1);
+        result.FaultDist[0].Should().HaveCount(MACETrainFixture.NumSensorTypes);
     }
 }

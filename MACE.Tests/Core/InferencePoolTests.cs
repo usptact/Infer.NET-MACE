@@ -22,7 +22,7 @@ public sealed class InferencePoolFixture : IDisposable
 {
     public const int PoolSize  = 2;
     public const int SensorTypes = 3;
-    public const int Categories  = 5;
+    public const int ThreatLevels = 5;
 
     public InferencePool Pool { get; }
 
@@ -33,7 +33,7 @@ public sealed class InferencePoolFixture : IDisposable
         new(Options.Create(new InferenceOptions
         {
             NumSensorTypes         = SensorTypes,
-            NumCategories          = Categories,
+            NumThreatLevels        = ThreatLevels,
             PoolSize               = size,
             MinSensorsForInference = 2,
             PoolAcquireTimeoutMs   = 500
@@ -124,7 +124,7 @@ public class InferencePoolTests : IClassFixture<InferencePoolFixture>
         var result = lease.Inferencer.InferOnline(
             [3, 3, 3], InferencePoolFixture.UniformPriors());
 
-        result.TDist.GetProbs().ToArray().Sum()
+        result.ThreatDist.GetProbs().ToArray().Sum()
               .Should().BeApproximately(1.0, precision: 1e-6);
     }
 

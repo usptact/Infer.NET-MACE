@@ -275,18 +275,18 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
 
         foreach (var phi in req.PhiPriors)
         {
-            if (phi.Pseudocounts.Count != _opts.NumCategories)
+            if (phi.Pseudocounts.Count != _opts.NumThreatLevels)
                 throw new RpcException(new Status(StatusCode.InvalidArgument,
-                    $"Each phi prior needs {_opts.NumCategories} pseudocounts, got {phi.Pseudocounts.Count}."));
+                    $"Each phi prior needs {_opts.NumThreatLevels} pseudocounts, got {phi.Pseudocounts.Count}."));
 
             if (phi.Pseudocounts.Any(c => c <= 0))
                 throw new RpcException(new Status(StatusCode.InvalidArgument,
                     "Dirichlet pseudocounts must all be positive."));
         }
 
-        if (req.WarmStart.Count > 0 && req.WarmStart.Count != _opts.NumCategories)
+        if (req.WarmStart.Count > 0 && req.WarmStart.Count != _opts.NumThreatLevels)
             throw new RpcException(new Status(StatusCode.InvalidArgument,
-                $"warm_start must be empty or have {_opts.NumCategories} elements, got {req.WarmStart.Count}."));
+                $"warm_start must be empty or have {_opts.NumThreatLevels} elements, got {req.WarmStart.Count}."));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -312,11 +312,11 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             NumObservations = numObs,
             InferenceMs     = ms
         };
-        resp.TDist.AddRange(result.TDist.GetProbs().ToArray());
+        resp.TDist.AddRange(result.ThreatDist.GetProbs().ToArray());
         for (int j = 0; j < req.Annotations.Count; j++)
         {
             if (req.Annotations[j] == -1) continue;
-            double sp = result.SDist[j].GetProbTrue();
+            double sp = result.FaultDist[j].GetProbTrue();
             resp.SensorReliability.Add(new SensorReliability
             {
                 SensorTypeIndex = j,
@@ -330,8 +330,8 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
 
     private InferResponse BuildFallbackResponse(InferRequest req, int numObs, int maxAnnotation)
     {
-        double uniform    = 1.0 / _opts.NumCategories;
-        double maxEntropy = Math.Log(_opts.NumCategories);
+        double uniform    = 1.0 / _opts.NumThreatLevels;
+        double maxEntropy = Math.Log(_opts.NumThreatLevels);
         var resp = new InferResponse
         {
             IncidentId      = req.IncidentId,
@@ -341,7 +341,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             NumObservations = numObs,
             InferenceMs     = 0
         };
-        resp.TDist.AddRange(Enumerable.Repeat(uniform, _opts.NumCategories));
+        resp.TDist.AddRange(Enumerable.Repeat(uniform, _opts.NumThreatLevels));
         return resp;
     }
 

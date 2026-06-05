@@ -14,7 +14,7 @@ namespace MACE
         /// Worker-item annotation matrix containing the observed votes (partially observed).
         /// A[item][worker] contains the annotation for that item-worker pair, or -1 for missing annotations.
         /// </summary>
-        protected VariableArray<VariableArray<int>, int[][]> _annotations;
+        protected VariableArray<VariableArray<int>, int[][]> _sensorReadings;
 
         /// <summary>
         /// Convenience constructor for the online inference pod.
@@ -22,8 +22,8 @@ namespace MACE
         /// </summary>
         /// <param name="numSensorTypes">Number of sensor types (= workers in MACE terminology).</param>
         /// <param name="numCategories">Number of threat-level categories (5 in ThreatSense).</param>
-        public MACETrain(int numSensorTypes, int numCategories)
-            : this(numSensorTypes, numItems: 1, numCategories) { }
+        public MACETrain(int numSensorTypes, int numThreatLevels)
+            : this(numSensorTypes, numIncidents: 1, numThreatLevels) { }
 
         /// <summary>
         /// Initializes a new instance of the MACETrain class.
@@ -32,28 +32,28 @@ namespace MACE
         /// <param name="numItems">Number of items to be annotated.</param>
         /// <param name="numCategories">Number of possible label categories.</param>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when any parameter is non-positive.</exception>
-        public MACETrain(int numWorkers, int numItems, int numCategories)
+        public MACETrain(int numSensorTypes, int numIncidents, int numThreatLevels)
         {
-            if (numWorkers <= 0)
+            if (numSensorTypes <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(numWorkers), "Number of workers must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(numSensorTypes), "Number of sensor types must be positive.");
             }
 
-            if (numItems <= 0)
+            if (numIncidents <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(numItems), "Number of items must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(numIncidents), "Number of incidents must be positive.");
             }
 
-            if (numCategories <= 0)
+            if (numThreatLevels <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
+                throw new ArgumentOutOfRangeException(nameof(numThreatLevels), "Number of threat levels must be positive.");
             }
 
-            _annotations = Variable.Array(Variable.Array<int>(_workerRange), _itemRange);
+            _sensorReadings = Variable.Array(Variable.Array<int>(_sensorRange), _incidentRange);
 
-            _numWorkers.ObservedValue = numWorkers;
-            _numItems.ObservedValue = numItems;
-            _numCategories.ObservedValue = numCategories;
+            _numSensorTypes.ObservedValue  = numSensorTypes;
+            _numIncidents.ObservedValue    = numIncidents;
+            _numThreatLevels.ObservedValue = numThreatLevels;
         }
 
         /// <summary>
@@ -63,37 +63,37 @@ namespace MACE
         {
             base.CreateModel();
 
-            using (Variable.ForEach(_itemRange))
+            using (Variable.ForEach(_incidentRange))
             {
-                // True label for this item (uniform prior over categories)
-                _trueLabels[_itemRange] = Variable.DiscreteUniform(_numCategories);
-                
-                using (Variable.ForEach(_workerRange))
+                // True threat level for this incident (uniform prior over threat levels)
+                _threatLevels[_incidentRange] = Variable.DiscreteUniform(_numThreatLevels);
+
+                using (Variable.ForEach(_sensorRange))
                 {
-                    // Spammer indicator for this worker-item pair
-                    _spammerIndicators[_itemRange][_workerRange] = Variable.Bernoulli(_theta[_workerRange]);
-                    
-                    // Only process observed annotations (skip missing data marked with -1)
-                    using (Variable.If(_annotations[_itemRange][_workerRange] > -1))
+                    // Fault indicator for this sensor-incident pair
+                    _faultIndicators[_incidentRange][_sensorRange] = Variable.Bernoulli(_theta[_sensorRange]);
+
+                    // Only process observed readings (skip absent sensors marked with -1)
+                    using (Variable.If(_sensorReadings[_incidentRange][_sensorRange] > -1))
                     {
-                        using (Variable.If(_spammerIndicators[_itemRange][_workerRange] == false))
+                        using (Variable.If(_faultIndicators[_incidentRange][_sensorRange] == false))
                         {
-                            // Not a spammer: assign the true label
-                            _annotations[_itemRange][_workerRange] = _trueLabels[_itemRange];
+                            // Reliable sensor: reports the true threat level
+                            _sensorReadings[_incidentRange][_sensorRange] = _threatLevels[_incidentRange];
                         }
-                        
-                        using (Variable.If(_spammerIndicators[_itemRange][_workerRange] == true))
+
+                        using (Variable.If(_faultIndicators[_incidentRange][_sensorRange] == true))
                         {
-                            // Spammer: assign label according to their preference distribution
-                            _annotations[_itemRange][_workerRange] = Variable.Discrete(_phi[_workerRange]);
+                            // Faulty sensor: reports according to its fault-bias distribution
+                            _sensorReadings[_incidentRange][_sensorRange] = Variable.Discrete(_phi[_sensorRange]);
                         }
                     }
                 }
             }
 
-            // Prevent the inference engine from trying to infer the observed annotations
-            // The annotations matrix can contain -1 values which are out of the domain
-            _annotations.AddAttribute(new DoNotInfer());
+            // Prevent the inference engine from trying to infer the observed sensor readings.
+            // The readings matrix can contain -1 values which are out of the domain.
+            _sensorReadings.AddAttribute(new DoNotInfer());
         }
 
         /// <summary>
@@ -111,33 +111,33 @@ namespace MACE
             }
 
             // Validate data dimensions
-            if (data.Length != _numItems.ObservedValue)
+            if (data.Length != _numIncidents.ObservedValue)
             {
                 throw new ArgumentException(
-                    $"Data has {data.Length} items but model expects {_numItems.ObservedValue} items.", 
+                    $"Data has {data.Length} incidents but model expects {_numIncidents.ObservedValue} incidents.",
                     nameof(data));
             }
 
             for (int i = 0; i < data.Length; i++)
             {
-                if (data[i] == null || data[i].Length != _numWorkers.ObservedValue)
+                if (data[i] == null || data[i].Length != _numSensorTypes.ObservedValue)
                 {
                     throw new ArgumentException(
-                        $"Data row {i} has {data[i]?.Length ?? 0} workers but model expects {_numWorkers.ObservedValue} workers.", 
+                        $"Data row {i} has {data[i]?.Length ?? 0} sensor types but model expects {_numSensorTypes.ObservedValue} sensor types.",
                         nameof(data));
                 }
             }
 
             var posteriors = new ModelData();
 
-            // Set the observed annotation data
-            _annotations.ObservedValue = data;
+            // Set the observed sensor readings
+            _sensorReadings.ObservedValue = data;
 
             // Perform inference to get posterior distributions
-            posteriors.ThetaDist = InferenceEngine.Infer<Beta[]>(_theta);
-            posteriors.PhiDist = InferenceEngine.Infer<Dirichlet[]>(_phi);
-            posteriors.TDist = InferenceEngine.Infer<Discrete[]>(_trueLabels);
-            posteriors.SDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators);
+            posteriors.ThetaDist   = InferenceEngine.Infer<Beta[]>(_theta);
+            posteriors.PhiDist     = InferenceEngine.Infer<Dirichlet[]>(_phi);
+            posteriors.ThreatDist  = InferenceEngine.Infer<Discrete[]>(_threatLevels);
+            posteriors.FaultDist   = InferenceEngine.Infer<Bernoulli[][]>(_faultIndicators);
 
             return posteriors;
         }
@@ -163,9 +163,9 @@ namespace MACE
         {
             if (annotations is null)
                 throw new ArgumentNullException(nameof(annotations));
-            if (annotations.Length != _numWorkers.ObservedValue)
+            if (annotations.Length != _numSensorTypes.ObservedValue)
                 throw new ArgumentException(
-                    $"annotations length {annotations.Length} != numSensorTypes {_numWorkers.ObservedValue}");
+                    $"annotations length {annotations.Length} != numSensorTypes {_numSensorTypes.ObservedValue}");
             if (priors is null)
                 throw new ArgumentNullException(nameof(priors));
 
@@ -173,16 +173,16 @@ namespace MACE
 
             // Discrete is a reference type — check for null directly.
             Discrete[]? warmStartArray = warmStart is not null ? [warmStart] : null;
-            InitializeLabels(1, _numCategories.ObservedValue, warmStartArray);
+            InitializeLabels(1, _numThreatLevels.ObservedValue, warmStartArray);
 
-            // Set observed data and run VMP.
-            // Call Infer<> only for the two variables we need (TDist and SDist).
+            // Set observed sensor readings and run VMP.
+            // Call Infer<> only for the two variables we need (ThreatDist and FaultDist).
             // Skipping ThetaDist and PhiDist avoids allocating those arrays; VMP
             // still runs once and produces valid marginals for all variables.
-            _annotations.ObservedValue = new int[1][] { annotations };
-            var tDist = InferenceEngine.Infer<Discrete[]>(_trueLabels)[0];
-            var sDist = InferenceEngine.Infer<Bernoulli[][]>(_spammerIndicators)[0];
-            var probs  = tDist.GetProbs();
+            _sensorReadings.ObservedValue = new int[1][] { annotations };
+            var threatDist = InferenceEngine.Infer<Discrete[]>(_threatLevels)[0];
+            var faultDist  = InferenceEngine.Infer<Bernoulli[][]>(_faultIndicators)[0];
+            var probs      = threatDist.GetProbs();
 
             int    threatLevel = 0;
             double confidence  = 0.0;
@@ -203,7 +203,7 @@ namespace MACE
                     entropy -= p * Math.Log(p);
             }
 
-            return new OnlineInferenceResult(tDist, sDist, threatLevel, confidence, entropy);
+            return new OnlineInferenceResult(threatDist, faultDist, threatLevel, confidence, entropy);
         }
     }
 }

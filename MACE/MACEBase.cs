@@ -16,13 +16,13 @@ namespace MACE
         public InferenceEngine InferenceEngine { get; protected set; } = null!;
 
         // Model dimensions
-        protected Variable<int> _numWorkers;
-        protected Variable<int> _numItems;
-        protected Variable<int> _numCategories;
+        protected Variable<int> _numSensorTypes;
+        protected Variable<int> _numIncidents;
+        protected Variable<int> _numThreatLevels;
         
         // Data-specific model variables
-        protected VariableArray<int> _trueLabels; // T: true labels for each item
-        protected VariableArray<VariableArray<bool>, bool[][]> _spammerIndicators; // S: whether each worker is spamming on each item
+        protected VariableArray<int> _threatLevels;  // T: true threat level for each incident
+        protected VariableArray<VariableArray<bool>, bool[][]> _faultIndicators; // S: fault indicator per sensor per incident
 
         // Prior distributions for shared random variables
         protected VariableArray<Beta> _thetaPriors; // Priors for worker spammer probabilities
@@ -33,29 +33,29 @@ namespace MACE
         protected VariableArray<Vector> _phi; // Worker label preferences when spamming
 
         // Ranges for indexing
-        protected Microsoft.ML.Probabilistic.Models.Range _itemRange;
-        protected Microsoft.ML.Probabilistic.Models.Range _workerRange;
+        protected Microsoft.ML.Probabilistic.Models.Range _incidentRange;
+        protected Microsoft.ML.Probabilistic.Models.Range _sensorRange;
 
         /// <summary>
         /// Initializes a new instance of the MACEBase class.
         /// </summary>
         protected MACEBase()
         {
-            _numWorkers = Variable.New<int>();
-            _numItems = Variable.New<int>();
-            _numCategories = Variable.New<int>();
+            _numSensorTypes  = Variable.New<int>();
+            _numIncidents    = Variable.New<int>();
+            _numThreatLevels = Variable.New<int>();
 
-            _itemRange = new Microsoft.ML.Probabilistic.Models.Range(_numItems).Named("item");
-            _workerRange = new Microsoft.ML.Probabilistic.Models.Range(_numWorkers).Named("worker");
+            _incidentRange = new Microsoft.ML.Probabilistic.Models.Range(_numIncidents).Named("incident");
+            _sensorRange   = new Microsoft.ML.Probabilistic.Models.Range(_numSensorTypes).Named("sensor");
 
-            _trueLabels = Variable.Array<int>(_itemRange);
-            _spammerIndicators = Variable.Array(Variable.Array<bool>(_workerRange), _itemRange);
+            _threatLevels    = Variable.Array<int>(_incidentRange);
+            _faultIndicators = Variable.Array(Variable.Array<bool>(_sensorRange), _incidentRange);
 
-            _thetaPriors = Variable.Array<Beta>(_workerRange).Named("thetaPrior");
-            _phiPriors = Variable.Array<Dirichlet>(_workerRange).Named("phiPrior");
+            _thetaPriors = Variable.Array<Beta>(_sensorRange).Named("thetaPrior");
+            _phiPriors   = Variable.Array<Dirichlet>(_sensorRange).Named("phiPrior");
 
-            _theta = Variable.Array<double>(_workerRange).Named("theta");
-            _phi = Variable.Array<Vector>(_workerRange).Named("phi");
+            _theta = Variable.Array<double>(_sensorRange).Named("theta");
+            _phi   = Variable.Array<Vector>(_sensorRange).Named("phi");
         }
 
         /// <summary>
@@ -65,10 +65,10 @@ namespace MACE
         public virtual void CreateModel()
         {
             // Define the prior distributions for worker parameters
-            using (Variable.ForEach(_workerRange))
+            using (Variable.ForEach(_sensorRange))
             {
-                _theta[_workerRange] = Variable.Random<double, Beta>(_thetaPriors[_workerRange]);
-                _phi[_workerRange] = Variable.Random<Vector, Dirichlet>(_phiPriors[_workerRange]);
+                _theta[_sensorRange] = Variable.Random<double, Beta>(_thetaPriors[_sensorRange]);
+                _phi[_sensorRange]   = Variable.Random<Vector, Dirichlet>(_phiPriors[_sensorRange]);
             }
 
             if (InferenceEngine == null)
@@ -109,8 +109,8 @@ namespace MACE
         /// Initializes the true labels with random assignments to break symmetry.
         /// Delegates to the warm-start overload with <c>warmStart = null</c>.
         /// </summary>
-        public void InitializeLabels(int numItems, int numCategories)
-            => InitializeLabels(numItems, numCategories, null);
+        public void InitializeLabels(int numIncidents, int numThreatLevels)
+            => InitializeLabels(numIncidents, numThreatLevels, null);
 
         /// <summary>
         /// Initializes the true labels for VMP symmetry-breaking.
@@ -124,30 +124,30 @@ namespace MACE
         /// Optional prior distributions from a previous inference cycle on the same incident.
         /// Null triggers the original random initialization.
         /// </param>
-        public void InitializeLabels(int numItems, int numCategories, Discrete[]? warmStart)
+        public void InitializeLabels(int numIncidents, int numThreatLevels, Discrete[]? warmStart)
         {
-            if (numItems <= 0)
-                throw new ArgumentOutOfRangeException(nameof(numItems), "Number of items must be positive.");
-            if (numCategories <= 0)
-                throw new ArgumentOutOfRangeException(nameof(numCategories), "Number of categories must be positive.");
+            if (numIncidents <= 0)
+                throw new ArgumentOutOfRangeException(nameof(numIncidents), "Number of incidents must be positive.");
+            if (numThreatLevels <= 0)
+                throw new ArgumentOutOfRangeException(nameof(numThreatLevels), "Number of threat levels must be positive.");
 
             Discrete[] initialLabels;
 
-            if (warmStart != null && warmStart.Length == numItems)
+            if (warmStart != null && warmStart.Length == numIncidents)
             {
                 initialLabels = warmStart;
             }
             else
             {
-                initialLabels = new Discrete[numItems];
-                for (int item = 0; item < numItems; item++)
+                initialLabels = new Discrete[numIncidents];
+                for (int incident = 0; incident < numIncidents; incident++)
                 {
-                    int randomLabel = Rand.Int(numCategories);
-                    initialLabels[item] = Discrete.PointMass(randomLabel, numCategories);
+                    int randomLevel = Rand.Int(numThreatLevels);
+                    initialLabels[incident] = Discrete.PointMass(randomLevel, numThreatLevels);
                 }
             }
 
-            _trueLabels.InitialiseTo(Distribution<int>.Array(initialLabels));
+            _threatLevels.InitialiseTo(Distribution<int>.Array(initialLabels));
         }
     }
 }

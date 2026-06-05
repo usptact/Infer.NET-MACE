@@ -56,7 +56,7 @@ public class PriorUpdateServiceTests
     {
         var prior = new BetaParameters(2.0, 8.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.5, annotation: -1, verdict);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.5, annotation: -1, verdict);
 
         result.Should().Be(prior);
     }
@@ -79,7 +79,7 @@ public class PriorUpdateServiceTests
     {
         var prior = new BetaParameters(1.0, 9.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.1, annotation: 3, Verdict.TrueAlarm);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.1, annotation: 3, Verdict.TrueAlarm);
 
         result.Alpha.Should().Be(prior.Alpha);
     }
@@ -90,7 +90,7 @@ public class PriorUpdateServiceTests
         // annotation == MediumThreshold (2) must take the flagged-threat path
         var prior = new BetaParameters(1.0, 9.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.5, annotation: 2, Verdict.TrueAlarm);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.5, annotation: 2, Verdict.TrueAlarm);
 
         result.Beta.Should().BeGreaterThan(prior.Beta);
         result.Alpha.Should().Be(prior.Alpha);
@@ -104,7 +104,7 @@ public class PriorUpdateServiceTests
         var prior = new BetaParameters(1.0, 9.0);
         const double lr = 0.5;
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.1, annotation: 1, Verdict.TrueAlarm, lr);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.1, annotation: 1, Verdict.TrueAlarm, lr);
 
         result.Alpha.Should().BeApproximately(prior.Alpha + lr * 0.3, precision: 1e-10);
     }
@@ -114,7 +114,7 @@ public class PriorUpdateServiceTests
     {
         var prior = new BetaParameters(1.0, 9.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.1, annotation: 1, Verdict.TrueAlarm);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.1, annotation: 1, Verdict.TrueAlarm);
 
         result.Beta.Should().Be(prior.Beta);
     }
@@ -125,7 +125,7 @@ public class PriorUpdateServiceTests
         // annotation == 1 is below MediumThreshold (2); delta must be lr*0.3 on alpha
         var prior = new BetaParameters(1.0, 9.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.0, annotation: 1, Verdict.TrueAlarm, learningRate: 1.0);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.0, annotation: 1, Verdict.TrueAlarm, learningRate: 1.0);
 
         result.Alpha.Should().BeApproximately(1.3, precision: 1e-10);
         result.Beta.Should().Be(9.0);
@@ -149,7 +149,7 @@ public class PriorUpdateServiceTests
     {
         var prior = new BetaParameters(1.0, 9.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.8, annotation: 3, Verdict.FalseAlarm);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.8, annotation: 3, Verdict.FalseAlarm);
 
         result.Beta.Should().Be(prior.Beta);
     }
@@ -162,7 +162,7 @@ public class PriorUpdateServiceTests
         var prior = new BetaParameters(1.0, 9.0);
         const double lr = 0.5;
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.1, annotation: 0, Verdict.FalseAlarm, lr);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.1, annotation: 0, Verdict.FalseAlarm, lr);
 
         result.Beta.Should().BeApproximately(prior.Beta + lr * 0.3, precision: 1e-10);
     }
@@ -172,7 +172,7 @@ public class PriorUpdateServiceTests
     {
         var prior = new BetaParameters(1.0, 9.0);
 
-        var result = _sut.UpdateTheta(prior, spammerProbMean: 0.1, annotation: 0, Verdict.FalseAlarm);
+        var result = _sut.UpdateTheta(prior, faultProbMean: 0.1, annotation: 0, Verdict.FalseAlarm);
 
         result.Alpha.Should().Be(prior.Alpha);
     }
