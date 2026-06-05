@@ -36,31 +36,31 @@ MACE (Hovy et al., NAACL 2013) is a hierarchical Bayesian model that aggregates 
 
 | Variable | Type | Description |
 |---|---|---|
-| `T[i]` | Discrete | True label for item `i` |
-| `S[i,j]` | Bernoulli | Whether worker `j` is "spamming" on item `i` |
-| `θ[j]` | Beta | Worker `j`'s base spammer probability |
-| `φ[j]` | Dirichlet | Worker `j`'s label bias when spamming |
+| `T[i]` | Discrete | True threat level for incident `i` |
+| `S[i,j]` | Bernoulli | Fault indicator — whether sensor `j` produced a faulty reading on incident `i` |
+| `θ[j]` | Beta | Sensor `j`'s base fault rate (unreliability) |
+| `φ[j]` | Dirichlet | Sensor `j`'s bias when unreliable |
 
 ### Generative Process
 
 ```
-For each item i:
-    T[i] ~ DiscreteUniform(numCategories)
+For each incident i:
+    T[i] ~ DiscreteUniform(numThreatLevels)
 
-    For each worker j:
+    For each sensor j:
         S[i,j] ~ Bernoulli(θ[j])
 
-        if S[i,j] = 0:   A[i,j] = T[i]           // reliable: reports true label
-        if S[i,j] = 1:   A[i,j] ~ Discrete(φ[j]) // spammer: reports biased label
+        if S[i,j] = 0:   A[i,j] = T[i]           // reliable: reports true threat level
+        if S[i,j] = 1:   A[i,j] ~ Discrete(φ[j]) // faulty: reports biased reading
 ```
 
-Inference uses **Variational Message Passing (VMP)** via Microsoft Infer.NET. VMP is approximate Bayesian inference that converges quickly and handles missing annotations (absent sensors) natively through the sparse matrix structure.
+Inference uses **Variational Message Passing (VMP)** via Microsoft Infer.NET. VMP is approximate Bayesian inference that converges quickly and handles missing sensor readings (absent sensors) natively through the sparse matrix structure.
 
 ### Online Learning
 
 In the batch formulation T, S, θ, φ are inferred jointly from a fixed matrix. In the online setting used here:
 
-1. Each active **incident** is a single item (`numItems = 1`).
+1. Each active **incident** is a single item (`numIncidents = 1`).
 2. **Priors** `θ[j]` and `φ[j]` are loaded from the Belief Store per request and reflect everything learned from past incidents.
 3. After the operator closes an incident with a verdict, the **Feedback Processor** applies a Bayesian Beta update to `θ[j]`, reinforcing reliable sensors and penalising false-alarm contributors.
 4. Updated priors are written back to the Belief Store and injected into the next request — completing the online learning loop.
@@ -73,11 +73,11 @@ In the batch formulation T, S, θ, φ are inferred jointly from a fixed matrix. 
 |---|---|
 | Worker `j` | Sensor / modality (camera, mic, door sensor, badge reader…) |
 | Item `i` | Threat incident (spatiotemporal event cluster) |
-| Annotation `A[i,j]` | Sensor `j`'s discretised threat assessment for incident `i` (0–4) |
-| True label `T[i]` | Latent threat level: 0=CLEAR, 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL |
-| Spammer probability `θ[j]` | Sensor `j`'s false-alarm rate |
-| Spammer preference `φ[j]` | Direction of sensor `j`'s bias when unreliable |
-| Missing annotation | Sensor not covering the incident zone / offline |
+| Annotation `A[i,j]` | Sensor reading `A[i,j]` — sensor `j`'s discretised threat assessment for incident `i` (0–4) |
+| True label `T[i]` | True threat level `T[i]`: 0=CLEAR, 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL |
+| Spammer probability `θ[j]` | Sensor `j`'s fault rate (base probability of producing an unreliable reading) |
+| Spammer preference `φ[j]` | Sensor `j`'s fault bias — the reading distribution when unreliable |
+| Missing annotation | Absent sensor — not covering the incident zone or offline |
 | Operator feedback | Gold-standard verdict used to update priors |
 
 ---
@@ -221,7 +221,7 @@ Called by the Incident Manager each time an annotation vector is updated (typica
 | `threat_level` | int32 | `argmax(t_dist)` |
 | `confidence` | double | `max(t_dist)` |
 | `entropy` | double | Shannon entropy (uncertainty measure) |
-| `sensor_reliability` | SensorReliability[] | Per-sensor spammer posterior and reliability score |
+| `sensor_reliability` | SensorReliability[] | Per-sensor fault probability and reliability score |
 | `inference_ms` | int64 | VMP wall-clock time |
 
 **Warm-start:** On the second and subsequent calls for the same incident, pass the previous `t_dist` as `warm_start`. VMP initialises from that distribution instead of random, typically halving the iteration count.
@@ -236,8 +236,8 @@ Implements the update rules from [THREATSENSE_DESIGN.md §7.5](THREATSENSE_DESIG
 
 | Condition | Effect on Beta(α, β) |
 |---|---|
-| TRUE_ALARM + sensor flagged (annotation ≥ 2) | `β += lr × (1 − spammer_prob)` — reinforce reliability |
-| FALSE_ALARM + sensor flagged | `α += lr × spammer_prob` — penalise false alarm |
+| TRUE_ALARM + sensor flagged (annotation ≥ 2) | `β += lr × (1 − fault_prob)` — reinforce reliability |
+| FALSE_ALARM + sensor flagged | `α += lr × fault_prob` — penalise false alarm |
 | TRUE_ALARM + sensor missed (annotation < 2) | `α += lr × 0.3` — penalise miss |
 | FALSE_ALARM + sensor quiet (annotation < 2) | `β += lr × 0.3` — reinforce correct silence |
 | annotation = -1 | No change — sensor was absent |
@@ -329,7 +329,7 @@ All values live in `MACE/appsettings.json` and can be overridden with environmen
 | Setting | Default | Env var | Description |
 |---|---|---|---|
 | `NumSensorTypes` | 7 | `INFERENCE__NUMSENSORTYPES` | Must match the annotation vector length |
-| `NumCategories` | 5 | `INFERENCE__NUMCATEGORIES` | Threat levels: CLEAR=0 … CRITICAL=4 |
+| `NumThreatLevels` | 5 | `INFERENCE__NUMTHREATLEVELS` | Threat levels: CLEAR=0 … CRITICAL=4 |
 | `PoolSize` | 4 | `INFERENCE__POOLSIZE` | Pre-warmed MACETrain instances |
 | `MinSensorsForInference` | 2 | `INFERENCE__MINSENSORSFORINFERENCE` | Below this, returns max-annotation fallback |
 | `PoolAcquireTimeoutMs` | 5000 | `INFERENCE__POOLACQUIRETIMEOUTMS` | gRPC UNAVAILABLE after this many ms |

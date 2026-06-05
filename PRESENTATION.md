@@ -84,9 +84,9 @@ These two questions are solved simultaneously. The sensor readings that agree wi
 
 | Prior | Interpretation |
 |---|---|
-| `Beta(1, 9)` — mean 10% spammer | Highly reliable; rarely disagrees with ground truth |
-| `Beta(5, 5)` — mean 50% spammer | Unknown; neutral cold-start for a new sensor |
-| `Beta(9, 1)` — mean 90% spammer | Highly unreliable; almost always disagrees |
+| `Beta(1, 9)` — mean fault rate 10% | Highly reliable; rarely disagrees with ground truth |
+| `Beta(5, 5)` — mean fault rate 50% | Unknown; neutral cold-start for a new sensor |
+| `Beta(9, 1)` — mean fault rate 90% | Highly unreliable; almost always disagrees |
 
 After each incident and operator verdict, these priors are updated. The changes are small per incident but compound over hundreds of incidents into a precise, evidence-based reliability profile for every sensor in the facility.
 
@@ -124,9 +124,9 @@ A sensor that is reliable in one context may be unreliable in another. The model
 
 **Example:** Consider an acoustic sensor (microphone) in two contexts:
 
-*In a quiet server room*, the microphone correctly detects glass-break events and agrees with the camera CV on every incident over three months. Its `β` grows steadily. It becomes one of the most trusted sensors in that zone — mean spammer probability < 5%.
+*In a quiet server room*, the microphone correctly detects glass-break events and agrees with the camera CV on every incident over three months. Its `β` grows steadily. It becomes one of the most trusted sensors in that zone — mean fault rate < 5%.
 
-*In a public lobby during business hours*, the same microphone model is installed next to an HVAC duct. It triggers repeatedly on ventilation noise. Cameras and door sensors consistently disagree with it. Its `α` grows across dozens of false alarms. In that zone, it accumulates a mean spammer probability > 70%. The system effectively mutes it in the lobby while still trusting the identical model in the server room.
+*In a public lobby during business hours*, the same microphone model is installed next to an HVAC duct. It triggers repeatedly on ventilation noise. Cameras and door sensors consistently disagree with it. Its `α` grows across dozens of false alarms. In that zone, it accumulates a mean fault rate > 70%. The system effectively mutes it in the lobby while still trusting the identical model in the server room.
 
 No one configured this distinction. No one wrote a rule. The system learned it from the pattern of disagreements and operator verdicts across two different deployment contexts.
 
@@ -295,8 +295,8 @@ After an operator closes an incident, the Feedback Processor updates the Beta pr
 
 | Condition | Update | Interpretation |
 |---|---|---|
-| TRUE\_ALARM + sensor flagged (annotation ≥ MEDIUM) | `β += lr × (1 − spammer_prob)` | Reliable sensor: reinforce |
-| FALSE\_ALARM + sensor flagged | `α += lr × spammer_prob` | Sensor cried wolf: penalize |
+| TRUE\_ALARM + sensor flagged (annotation ≥ MEDIUM) | `β += lr × (1 − fault_prob)` | Reliable sensor: reinforce |
+| FALSE\_ALARM + sensor flagged | `α += lr × fault_prob` | Sensor cried wolf: penalize |
 | TRUE\_ALARM + sensor missed (annotation < MEDIUM) | `α += lr × 0.3` | Sensor missed threat: penalize slightly |
 | FALSE\_ALARM + sensor stayed quiet | `β += lr × 0.3` | Sensor correctly quiet: reinforce slightly |
 
@@ -327,8 +327,8 @@ Camera and time context agree on HIGH. The microphone reported MEDIUM — one le
 **Step 3 — Operator confirms TRUE\_ALARM**
 
 After the operator verdict, priors update:
-- Camera `β` increases significantly — it correctly flagged HIGH with low spammer probability
-- Microphone `β` barely increases — it flagged the threat (annotation ≥ MEDIUM) but was judged 94% spammer, so it receives almost no credit
+- Camera `β` increases significantly — it correctly flagged HIGH with low fault probability
+- Microphone `β` barely increases — it flagged the threat (annotation ≥ MEDIUM) but was judged 94% likely faulty, so it receives almost no credit
 - Door sensor `α` increases — it missed the threat entirely
 
 **Step 4 — Adjacent zone: glass break** *(separate incident)*
@@ -341,7 +341,7 @@ Camera and glass-break agree on CRITICAL; microphone under-reports at HIGH. Micr
 - Camera: CLEAR · Microphone: CLEAR · Door: CLEAR · Time context: HIGH (still 02:30)
 - Result: threat=CLEAR, confidence=**99.96%**, entropy=0.003
 
-Three now-trusted physical sensors agree on CLEAR. Time context insists HIGH. The model judges time context **99.97% spammer** for this incident — it structurally disagrees with the authoritative physical sensors — and overrides it. The system stands down.
+Three now-trusted physical sensors agree on CLEAR. Time context insists HIGH. The model judges time context **99.97% likely faulty** for this incident — it structurally disagrees with the authoritative physical sensors — and overrides it. The system stands down.
 
 ---
 
@@ -351,15 +351,15 @@ The more interesting story is what happens to sensor priors across hundreds of i
 
 **The microphone's reliability history in the north corridor:**
 
-After 3 months and ~120 incidents, the north corridor microphone has a pattern: on clear-cut alarms confirmed by cameras, it consistently reports one level below the camera. Operators always confirm TRUE\_ALARM. Each time, the microphone is judged a low-credit participant — it flagged something, but disagreed with the consensus level. Its `β` grows slowly, `α` never declines much. After 120 incidents its mean spammer probability settles around **35%** — the system has learned that this microphone *tends to under-read*, but is not completely dismissed.
+After 3 months and ~120 incidents, the north corridor microphone has a pattern: on clear-cut alarms confirmed by cameras, it consistently reports one level below the camera. Operators always confirm TRUE\_ALARM. Each time, the microphone is judged a low-credit participant — it flagged something, but disagreed with the consensus level. Its `β` grows slowly, `α` never declines much. After 120 incidents its mean fault rate settles around **35%** — the system has learned that this microphone *tends to under-read*, but is not completely dismissed.
 
 **The same microphone model in the server room:**
 
-In the server room — a quiet, carpeted space — the same microphone model accurately detects glass-break and forced-door events, agreeing with the camera and glass-break sensor every time. After 120 incidents its mean spammer probability settles around **8%**. It is one of the most trusted sensors in that zone.
+In the server room — a quiet, carpeted space — the same microphone model accurately detects glass-break and forced-door events, agreeing with the camera and glass-break sensor every time. After 120 incidents its mean fault rate settles around **8%**. It is one of the most trusted sensors in that zone.
 
 **Nobody configured this difference.** No one wrote a rule that "the lobby mic is less reliable than the server room mic." The system inferred it from the pattern of agreements and disagreements across incidents in each zone, cross-validated by operator verdicts.
 
-**Adding a new sensor type** (say, a thermal camera) is straightforward: register it with a neutral prior `Beta(5, 5)` — 50% assumed spammer — and it immediately participates in inference. Its weight starts low, reflecting genuine uncertainty. Within 20–30 confirmed incidents it will have accumulated enough evidence to settle into a reliable prior, either trusted or discounted, based purely on how well its readings correlate with eventual outcomes.
+**Adding a new sensor type** (say, a thermal camera) is straightforward: register it with a neutral prior `Beta(5, 5)` — 50% assumed fault rate — and it immediately participates in inference. Its weight starts low, reflecting genuine uncertainty. Within 20–30 confirmed incidents it will have accumulated enough evidence to settle into a reliable prior, either trusted or discounted, based purely on how well its readings correlate with eventual outcomes.
 
 ---
 
@@ -402,7 +402,7 @@ The built components constitute the **inference core** of ThreatSense — the mo
 
 1. **Latency at 7 sensor types.** Current VMP runs in 300–800 ms. The design target is ≤500 ms P99. Warm-starting typically brings this to 300–500 ms. Under adversarial load (pool saturation) P99 approaches 5 s. Mitigation: increase pool size or add pod replicas.
 
-2. **Cold-start sensor reliability.** A newly installed sensor starts with a neutral prior `Beta(5,5)` — 50% assumed spammer rate — until evidence accumulates. For high-stakes sensors (glass-break), it may be desirable to seed them with an informative prior `Beta(1,9)` based on manufacturer specs.
+2. **Cold-start sensor reliability.** A newly installed sensor starts with a neutral prior `Beta(5,5)` — 50% assumed fault rate — until evidence accumulates. For high-stakes sensors (glass-break), it may be desirable to seed them with an informative prior `Beta(1,9)` based on manufacturer specs.
 
 3. **Temporal decay.** A sensor annotation from 10 minutes ago should carry less weight than one from 10 seconds ago. This is not modeled. One approach: decay annotations toward -1 (absent) as they age, or weight them in a pre-processing step.
 

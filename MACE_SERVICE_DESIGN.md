@@ -11,7 +11,7 @@ requirements, API specs for the other services) see [THREATSENSE_DESIGN.md](THRE
 The MACE inference pod is a **stateless gRPC service** that:
 
 1. Accepts a flat annotation vector (`int[]`, one entry per sensor type, -1 = absent) together with Beta/Dirichlet priors loaded by the caller from the Belief Store.
-2. Runs Infer.NET VMP inference to produce a posterior distribution over threat levels and per-sensor spammer probabilities.
+2. Runs Infer.NET VMP inference to produce a posterior distribution over threat levels and per-sensor fault probabilities.
 3. Returns the result; it stores nothing.
 4. Optionally computes updated Beta priors from an operator verdict (pure arithmetic, no Infer.NET).
 
@@ -38,7 +38,7 @@ Batch test data (`sample_data.txt`, `adult_data.txt`, `true_labels.txt`) moved t
 
 `InitializeLabels(int, int)` previously assigned a random point-mass label to each item for VMP symmetry-breaking. For the online pod, where the same incident is re-inferred as new sensor events arrive, we can warm-start from the previous posterior instead. VMP converges in fewer iterations when started near the true solution.
 
-**Change:** Added `InitializeLabels(int numItems, int numCategories, Discrete[]? warmStart)`. When `warmStart` is non-null and matches `numItems`, those distributions are used directly. Null falls back to the original random behaviour. The original two-argument signature now delegates to this overload with `null`.
+**Change:** Added `InitializeLabels(int numIncidents, int numThreatLevels, Discrete[]? warmStart)`. When `warmStart` is non-null and matches `numIncidents`, those distributions are used directly. Null falls back to the original random behaviour. The original two-argument signature now delegates to this overload with `null`.
 
 ---
 
@@ -48,7 +48,7 @@ Batch test data (`sample_data.txt`, `adult_data.txt`, `true_labels.txt`) moved t
 
 | Problem | Impact |
 |---|---|
-| Constructor requires `numItems` | Online pod always uses 1; the parameter is misleading |
+| Constructor requires `numIncidents` | Online pod always uses 1; the parameter is misleading |
 | `InferModelData(int[][] data)` requires a jagged array | Every call must wrap a flat `int[]` in `new int[1][]` |
 | `InferModelData` materialises `ThetaDist` and `PhiDist` | Two arrays allocated and immediately discarded in the online path |
 | Return type `ModelData` uses batch arrays | Callers must remember to index `[0]`; risk of off-by-one |
@@ -56,9 +56,9 @@ Batch test data (`sample_data.txt`, `adult_data.txt`, `true_labels.txt`) moved t
 **Changes:**
 
 ```csharp
-// numItems=1 for the online pod
-public MACETrain(int numSensorTypes, int numCategories)
-    : this(numSensorTypes, numItems: 1, numCategories) { }
+// numIncidents=1 for the online pod
+public MACETrain(int numSensorTypes, int numThreatLevels)
+    : this(numSensorTypes, numIncidents: 1, numThreatLevels) { }
 ```
 
 ```csharp
@@ -68,7 +68,7 @@ public OnlineInferenceResult InferOnline(
     Discrete? warmStart = null)
 ```
 
-`InferOnline` calls `InferenceEngine.Infer<>` only for `_trueLabels` and `_spammerIndicators`, skipping the `ThetaDist`/`PhiDist` extraction that `InferModelData` performs. VMP runs once regardless; the optimisation is allocation only.
+`InferOnline` calls `InferenceEngine.Infer<>` only for `_threatLevels` and `_faultIndicators`, skipping the `ThetaDist`/`PhiDist` extraction that `InferModelData` performs. VMP runs once regardless; the optimisation is allocation only.
 
 The original batch constructor and `InferModelData(int[][] data)` are preserved — backward compatible for offline experiments using `testdata/`.
 
@@ -78,15 +78,15 @@ The original batch constructor and `InferModelData(int[][] data)` are preserved 
 
 ```csharp
 public record OnlineInferenceResult(
-    Discrete    TDist,       // posterior over threat levels (length = NumCategories)
-    Bernoulli[] SDist,       // spammer posteriors, one per sensor type
-    int         ThreatLevel, // argmax(TDist.GetProbs())
+    Discrete    ThreatDist,  // posterior over threat levels (length = NumThreatLevels)
+    Bernoulli[] FaultDist,   // per-sensor fault indicator posteriors
+    int         ThreatLevel, // argmax(ThreatDist.GetProbs())
     double      Confidence,  // max probability
     double      Entropy      // Shannon entropy
 );
 ```
 
-Named derived quantities (argmax, confidence, entropy) so the gRPC handler does not recompute them, and so callers never index `TDist[0]` by convention.
+Named derived quantities (argmax, confidence, entropy) so the gRPC handler does not recompute them, and so callers never index `ThreatDist[0]` by convention.
 
 ---
 
@@ -116,6 +116,8 @@ Removed `<None Include="sample_data.txt" .../>` — test data no longer copied i
 ### `MACE/Protos/mace_inference.proto` — service contract
 
 Single source of truth for the gRPC interface. Three RPCs:
+
+> **Naming note.** Proto field names (`theta_priors`, `phi_priors`, `t_dist`, `spammer_prob`, `spammer_prob_mean`) retain the original MACE crowdsourcing vocabulary. Internal C# symbols have been renamed to domain terms (`ThreatDist`, `FaultDist`, `faultProbMean`, etc.), but the wire format is unchanged to preserve backward compatibility with existing callers. A proto-layer rename is deferred as a separate breaking-change commit.
 
 | RPC | Path | Notes |
 |---|---|---|
@@ -154,8 +156,8 @@ Update rules (from THREATSENSE_DESIGN.md §7.5):
 
 | Condition | Update |
 |---|---|
-| TRUE_ALARM + annotation ≥ MEDIUM (≥2) | `β += lr × (1 − spammerProbMean)` |
-| FALSE_ALARM + annotation ≥ MEDIUM | `α += lr × spammerProbMean` |
+| TRUE_ALARM + annotation ≥ MEDIUM (≥2) | `β += lr × (1 − faultProbMean)` |
+| FALSE_ALARM + annotation ≥ MEDIUM | `α += lr × faultProbMean` |
 | TRUE_ALARM + annotation < MEDIUM | `α += lr × 0.3` |
 | FALSE_ALARM + annotation < MEDIUM | `β += lr × 0.3` |
 | annotation == -1 | no change |
@@ -182,7 +184,7 @@ Implements the three RPCs. Notable design points:
 
 ASP.NET Core bootstrap:
 - Kestrel configured for cleartext HTTP/2 (H2C) on port 8080 — TLS terminated at the load-balancer level in Kubernetes.
-- `InferencePool` forced to construct before the first request via `GetRequiredService<InferencePool>()` — this pre-warms all slots synchronously at startup rather than on the first concurrent burst.
+- `InferencePool` forced to construct before the first request via `GetRequiredService<IInferencePool>()` — this pre-warms all slots synchronously at startup rather than on the first concurrent burst.
 - Prometheus `UseMetricServer(port: 9090)` creates a separate HTTP/1.1 listener so Prometheus can scrape without H2C support.
 
 ---
