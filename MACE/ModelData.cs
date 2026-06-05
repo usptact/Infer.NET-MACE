@@ -22,14 +22,14 @@ namespace MACE
     public class ModelData
     {
         /// <summary>
-        /// Prior/posterior distributions for worker spammer probabilities (theta).
-        /// Each element represents the Beta distribution for one worker's spammer probability.
+        /// Prior/posterior distributions for sensor fault rates (θ).
+        /// Each element is the Beta distribution for one sensor type's fault rate.
         /// </summary>
         public Beta[] ThetaDist { get; set; } = Array.Empty<Beta>();
 
         /// <summary>
-        /// Prior/posterior distributions for worker label preferences (phi).
-        /// Each element represents the Dirichlet distribution for one worker's label preferences when spamming.
+        /// Prior/posterior distributions for sensor fault-bias (φ).
+        /// Each element is the Dirichlet distribution over readings a sensor tends to produce when unreliable.
         /// </summary>
         public Dirichlet[] PhiDist { get; set; } = Array.Empty<Dirichlet>();
 

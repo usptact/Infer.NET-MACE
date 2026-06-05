@@ -6,7 +6,7 @@ namespace MACE
 {
     /// <summary>
     /// Base class for the MACE (Multi-Annotator Competence Estimation) model.
-    /// This class defines the probabilistic model structure for crowdsourcing annotation quality estimation.
+    /// Defines the probabilistic model structure for sensor reliability estimation and threat-level inference.
     /// </summary>
     public abstract class MACEBase
     {
@@ -25,12 +25,12 @@ namespace MACE
         protected VariableArray<VariableArray<bool>, bool[][]> _faultIndicators; // S: fault indicator per sensor per incident
 
         // Prior distributions for shared random variables
-        protected VariableArray<Beta> _thetaPriors; // Priors for worker spammer probabilities
-        protected VariableArray<Dirichlet> _phiPriors; // Priors for worker label preferences when spamming
+        protected VariableArray<Beta> _thetaPriors; // θ priors — sensor fault rate per sensor type
+        protected VariableArray<Dirichlet> _phiPriors; // φ priors — sensor fault bias per sensor type
 
         // Shared random variables
-        protected VariableArray<double> _theta; // Worker spammer probabilities
-        protected VariableArray<Vector> _phi; // Worker label preferences when spamming
+        protected VariableArray<double> _theta; // θ — per-sensor fault rates
+        protected VariableArray<Vector> _phi;   // φ — per-sensor fault-bias distributions
 
         // Ranges for indexing
         protected Microsoft.ML.Probabilistic.Models.Range _incidentRange;
@@ -64,7 +64,7 @@ namespace MACE
         /// </summary>
         public virtual void CreateModel()
         {
-            // Define the prior distributions for worker parameters
+            // Define the prior distributions for sensor parameters (θ and φ)
             using (Variable.ForEach(_sensorRange))
             {
                 _theta[_sensorRange] = Variable.Random<double, Beta>(_thetaPriors[_sensorRange]);
@@ -118,8 +118,8 @@ namespace MACE
         /// allowing the solver to start near a previous posterior and converge in fewer iterations.
         /// Falls back to random point-mass initialization when <paramref name="warmStart"/> is null.
         /// </summary>
-        /// <param name="numItems">Number of items (must equal warmStart.Length when warm-starting).</param>
-        /// <param name="numCategories">Number of possible label categories.</param>
+        /// <param name="numIncidents">Number of incidents (must equal warmStart.Length when warm-starting).</param>
+        /// <param name="numThreatLevels">Number of discrete threat levels.</param>
         /// <param name="warmStart">
         /// Optional prior distributions from a previous inference cycle on the same incident.
         /// Null triggers the original random initialization.

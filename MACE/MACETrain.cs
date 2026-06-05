@@ -5,32 +5,32 @@ using Microsoft.ML.Probabilistic.Models.Attributes;
 namespace MACE
 {
     /// <summary>
-    /// Implements the MACE (Multi-Annotator Competence Estimation) model for crowdsourcing annotation quality estimation.
-    /// This class extends MACEBase to define the complete probabilistic model including the observation model.
+    /// Implements the MACE (Multi-Annotator Competence Estimation) model for sensor reliability estimation
+    /// and threat-level inference. Extends MACEBase with the observation model (sensor readings).
     /// </summary>
     public class MACETrain : MACEBase
     {
         /// <summary>
-        /// Worker-item annotation matrix containing the observed votes (partially observed).
-        /// A[item][worker] contains the annotation for that item-worker pair, or -1 for missing annotations.
+        /// Sensor reading matrix (partially observed).
+        /// A[incident][sensor] contains the sensor's discretised reading (0–4), or -1 for absent sensors.
         /// </summary>
         protected VariableArray<VariableArray<int>, int[][]> _sensorReadings;
 
         /// <summary>
         /// Convenience constructor for the online inference pod.
-        /// <c>numItems</c> is always 1 in the online setting (one active incident per request).
+        /// <c>numIncidents</c> is fixed to 1: the pod processes one active incident per request.
         /// </summary>
-        /// <param name="numSensorTypes">Number of sensor types (= workers in MACE terminology).</param>
-        /// <param name="numCategories">Number of threat-level categories (5 in ThreatSense).</param>
+        /// <param name="numSensorTypes">Number of sensor types.</param>
+        /// <param name="numThreatLevels">Number of discrete threat levels (5 in ThreatSense).</param>
         public MACETrain(int numSensorTypes, int numThreatLevels)
             : this(numSensorTypes, numIncidents: 1, numThreatLevels) { }
 
         /// <summary>
-        /// Initializes a new instance of the MACETrain class.
+        /// Full constructor; supports both online (numIncidents=1) and batch (numIncidents&gt;1) inference.
         /// </summary>
-        /// <param name="numWorkers">Number of workers in the dataset.</param>
-        /// <param name="numItems">Number of items to be annotated.</param>
-        /// <param name="numCategories">Number of possible label categories.</param>
+        /// <param name="numSensorTypes">Number of sensor types.</param>
+        /// <param name="numIncidents">Number of incidents in the reading matrix. Use 1 for online inference.</param>
+        /// <param name="numThreatLevels">Number of discrete threat levels.</param>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when any parameter is non-positive.</exception>
         public MACETrain(int numSensorTypes, int numIncidents, int numThreatLevels)
         {
@@ -99,7 +99,7 @@ namespace MACE
         /// <summary>
         /// Performs probabilistic inference to estimate the posterior distributions of all model parameters.
         /// </summary>
-        /// <param name="data">The annotation data matrix where data[item][worker] gives the annotation or -1 for missing.</param>
+        /// <param name="data">Sensor reading matrix: data[incident][sensor] gives the reading (0–4) or -1 for absent sensors.</param>
         /// <returns>ModelData containing the posterior distributions for all model parameters.</returns>
         /// <exception cref="ArgumentNullException">Thrown when data is null.</exception>
         /// <exception cref="ArgumentException">Thrown when data dimensions don't match the expected dimensions.</exception>
@@ -144,12 +144,13 @@ namespace MACE
 
         /// <summary>
         /// Online single-incident inference.
-        /// Accepts a flat annotation vector (one entry per sensor type, -1 = absent),
+        /// Accepts a flat sensor reading vector (one entry per sensor type, -1 = absent),
         /// injects the supplied priors, optionally warm-starts from a previous posterior,
         /// and returns a typed result that avoids batch-array indexing by the caller.
         /// </summary>
         /// <param name="annotations">
-        /// Flat array of length <c>numSensorTypes</c>. -1 marks absent sensors.
+        /// Flat sensor reading array of length <c>numSensorTypes</c>. -1 marks absent sensors.
+        /// Named <c>annotations</c> to match the proto field; semantically these are sensor readings.
         /// </param>
         /// <param name="priors">Current theta and phi priors from the Belief Store.</param>
         /// <param name="warmStart">

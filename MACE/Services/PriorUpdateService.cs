@@ -8,7 +8,7 @@ public record BetaParameters(double Alpha, double Beta);
 /// Computes updated Beta priors from operator feedback.
 ///
 /// This is pure arithmetic — no Infer.NET required. The update rules follow
-/// THREATSENSE_DESIGN.md §7.5 and interpret the spammer posterior S[0][j]
+/// THREATSENSE_DESIGN.md §7.5 and interpret the fault indicator posterior S[0][j]
 /// produced by a previous Infer call.
 /// </summary>
 public sealed class PriorUpdateService
@@ -21,8 +21,8 @@ public sealed class PriorUpdateService
     /// updated based on whether the sensor's behaviour was consistent with the verdict.
     /// </summary>
     /// <param name="current">Current Beta(α, β) prior for sensor j.</param>
-    /// <param name="spammerProbMean">
-    ///   Mean of S[0][j] from the most recent Infer call on this incident.
+    /// <param name="faultProbMean">
+    ///   Mean of the fault indicator S[0][j] from the most recent Infer call on this incident.
     /// </param>
     /// <param name="annotation">
     ///   Discretised label sensor j provided. -1 if sensor was absent.
