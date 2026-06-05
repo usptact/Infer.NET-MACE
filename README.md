@@ -1,7 +1,7 @@
 # ThreatSense — MACE Inference Service
 
-[![.NET](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Infer.NET](https://img.shields.io/badge/Infer.NET-0.4.2402.2904-purple.svg)](https://dotnet.github.io/infer/)
+[![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Infer.NET](https://img.shields.io/badge/Infer.NET-0.4.2504.701-purple.svg)](https://dotnet.github.io/infer/)
 [![gRPC](https://img.shields.io/badge/transport-gRPC-cyan.svg)](https://grpc.io)
 [![Python](https://img.shields.io/badge/test--client-FastAPI-green.svg)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -21,6 +21,7 @@ The main deliverable in this repository is the **MACE Inference Service**: an AS
 - [gRPC API](#grpc-api)
 - [Test Client (FastAPI Gateway)](#test-client-fastapi-gateway)
 - [Configuration](#configuration)
+- [Unit Tests](#unit-tests)
 - [Kubernetes Deployment](#kubernetes-deployment)
 - [Design Documents](#design-documents)
 - [References](#references)
@@ -85,7 +86,7 @@ In the batch formulation T, S, θ, φ are inferred jointly from a fixed matrix. 
 
 ### Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - Python 3.11+ (for the test client)
 - Docker (optional, for local infra)
 
@@ -139,10 +140,11 @@ Expected response: `threat_level: 3` (HIGH), `confidence ≥ 0.70`.
 
 ```
 .
-├── MACE/                          # The gRPC inference service (.NET 8 / Infer.NET)
+├── MACE/                          # The gRPC inference service (.NET 10 / Infer.NET)
 │   ├── Protos/
 │   │   └── mace_inference.proto   # gRPC service contract (Infer, UpdatePriors, Health)
 │   ├── Core/
+│   │   ├── IInferencePool.cs      # Pool abstraction (enables unit testing without Infer.NET)
 │   │   ├── InferenceOptions.cs    # Config POCO (bound from appsettings / env vars)
 │   │   └── InferencePool.cs       # Thread-safe pool of MACETrain instances
 │   ├── Services/
@@ -153,6 +155,18 @@ Expected response: `threat_level: 3` (HIGH), `confidence ≥ 0.70`.
 │   ├── ModelData.cs               # ModelData + OnlineInferenceResult records
 │   ├── Program.cs                 # ASP.NET Core bootstrap (Minimal API + gRPC)
 │   └── appsettings.json           # Default configuration
+│
+├── MACE.Tests/                    # xUnit test suite (104 tests)
+│   ├── Core/
+│   │   └── InferencePoolTests.cs  # Pool acquire/release, concurrency, dispose semantics
+│   ├── Inference/
+│   │   └── MACETrainTests.cs      # MACETrain/MACEBase with real Infer.NET VMP
+│   ├── Logging/
+│   │   └── ShortClassNameEnricherTests.cs  # Serilog enricher
+│   ├── Services/
+│   │   ├── MaceInferenceGrpcServiceTests.cs  # gRPC service with mock pool
+│   │   └── PriorUpdateServiceTests.cs        # Beta prior update arithmetic
+│   └── MACE.Tests.csproj
 │
 ├── test-client/                   # FastAPI HTTP→gRPC bridge (Python)
 │   ├── main.py                    # FastAPI app; /infer, /update-priors, /health
@@ -173,6 +187,7 @@ Expected response: `threat_level: 3` (HIGH), `confidence ≥ 0.70`.
 │   ├── sample_data.txt
 │   └── adult_data.txt
 │
+├── global.json                    # Pins .NET SDK to 10.0.x
 ├── THREATSENSE_DESIGN.md          # Full system design: requirements, APIs, sub-systems
 ├── MACE_SERVICE_DESIGN.md         # Source-level rationale for every change in this service
 └── INFRASTRUCTURE.md              # On-premises Kubernetes deployment guide
@@ -325,6 +340,55 @@ All values live in `MACE/appsettings.json` and can be overridden with environmen
 
 ---
 
+## Unit Tests
+
+The test suite lives in `MACE.Tests/` and uses **xUnit 2.9**, **FluentAssertions**, and **Moq**. It contains 104 tests organised into four parts.
+
+### Run all tests
+
+```bash
+dotnet test MACE.Tests/MACE.Tests.csproj
+```
+
+### Run only the fast tests (skip Infer.NET inference)
+
+Tests that invoke real VMP inference are tagged `[Trait("Category", "Integration")]`. Filter them out when you want a sub-second feedback loop:
+
+```bash
+dotnet test MACE.Tests/MACE.Tests.csproj --filter "Category!=Integration"
+```
+
+This runs Parts 1 and the non-Infer.NET subset of Part 4 in under one second.
+
+### Run a specific part or class
+
+```bash
+# All pool tests
+dotnet test MACE.Tests/MACE.Tests.csproj --filter "FullyQualifiedName~InferencePoolTests"
+
+# All gRPC service tests
+dotnet test MACE.Tests/MACE.Tests.csproj --filter "FullyQualifiedName~MaceInferenceGrpcServiceTests"
+```
+
+### Test breakdown
+
+| Part | File | Tests | Speed | What's covered |
+|---|---|---|---|---|
+| 1 — Pure logic | `Services/PriorUpdateServiceTests.cs` | 33 | <1 ms each | `UpdateTheta` all four verdict×flagged combinations, boundary at `MediumThreshold`, learning-rate scaling; `ParseVerdict` case-insensitivity and error cases |
+| 1 — Logging | `Logging/ShortClassNameEnricherTests.cs` | 5 | <1 ms each | Namespace stripping, no-namespace passthrough, missing `SourceContext`, property always named `ShortContext` |
+| 2 — Inference core | `Inference/MACETrainTests.cs` | 32 | ~400 ms each | Constructor validation; `SetModelData`/`InitializeLabels` error paths; `InferOnline` output invariants (probs sum to 1, confidence = max, ThreatLevel = argmax, entropy ≥ 0); consensus vs disagreement entropy; warm-start; `InferModelData` shape |
+| 3 — Pool | `Core/InferencePoolTests.cs` | 13 | <5 ms each* | Acquire/release `Available` counter; all-slots sequential and concurrent acquisition; pool-exhaustion cancellation; extra task unblocks when slot released; `ObjectDisposedException` on disposed pool; idempotent `Dispose` |
+| 4 — gRPC service | `Services/MaceInferenceGrpcServiceTests.cs` | 26 | <10 ms each† | All seven validation branches (`InvalidArgument`); fallback path for `<MinSensorsForInference`; pool exhaustion → `Unavailable`; happy-path response invariants; `UpdatePriors` unknown verdict and default learning rate; `Health` pool state and uptime |
+
+\* Pool creation pays the Infer.NET Roslyn JIT cost once per test class via `IClassFixture`; individual tests run in <5 ms.  
+† Part 4 uses a mock `IInferencePool` — no Infer.NET involved. The four happy-path tests that call real VMP are tagged `Integration` and take ~400 ms each.
+
+### Architecture note — `IInferencePool`
+
+`MaceInferenceGrpcService` depends on `IInferencePool` (not the concrete `InferencePool` class) so the gRPC service layer can be tested entirely with a Moq mock, without spinning up Infer.NET. `InferencePool` implements `IInferencePool` and is registered in DI as `AddSingleton<IInferencePool, InferencePool>()`.
+
+---
+
 ## Kubernetes Deployment
 
 Full on-premises deployment on a 3-node k3s cluster with NAS-backed NFS storage is documented in [INFRASTRUCTURE.md](INFRASTRUCTURE.md).
@@ -355,7 +419,7 @@ volumes:
   emptyDir: { medium: Memory, sizeLimit: 256Mi }
 
 # Debian base required — Infer.NET MKL uses glibc (not musl/Alpine)
-image: mcr.microsoft.com/dotnet/aspnet:8.0
+image: mcr.microsoft.com/dotnet/aspnet:10.0
 ```
 
 ---
@@ -377,10 +441,6 @@ image: mcr.microsoft.com/dotnet/aspnet:8.0
 ```bash
 dotnet build MACE/MACE.csproj
 ```
-
-### Run tests
-
-The project currently validates behaviour through the test client. Integration test coverage using `xUnit` is planned.
 
 ### Run the service with verbose logging
 
