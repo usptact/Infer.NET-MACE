@@ -30,8 +30,8 @@ try
     // output template are always applied regardless of which appsettings file
     // is active.  MinimumLevel overrides live in appsettings.json /
     // appsettings.Development.json under the "Serilog" key.
-    builder.Host.UseSerilog((ctx, _, config) => config
-        .ReadFrom.Configuration(ctx.Configuration)
+    builder.Services.AddSerilog(loggerConfig => loggerConfig
+        .ReadFrom.Configuration(builder.Configuration)
         .Enrich.FromLogContext()
         .Enrich.With<ShortClassNameEnricher>()
         .WriteTo.Console(outputTemplate:
@@ -39,7 +39,7 @@ try
 
     // ── DI registrations ──────────────────────────────────────────────────────
     builder.Services.Configure<InferenceOptions>(builder.Configuration.GetSection("Inference"));
-    builder.Services.AddSingleton<InferencePool>();
+    builder.Services.AddSingleton<IInferencePool, InferencePool>();
     builder.Services.AddSingleton<PriorUpdateService>();
     builder.Services.AddGrpc();
 
@@ -65,7 +65,7 @@ try
 
     // Force the singleton to construct now so the pool is fully warm before
     // the first request arrives (otherwise the first caller pays the cost).
-    _ = app.Services.GetRequiredService<InferencePool>();
+    _ = app.Services.GetRequiredService<IInferencePool>();
 
     app.MapGrpcService<MaceInferenceGrpcService>();
 

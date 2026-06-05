@@ -18,9 +18,15 @@
 # Ports:
 #   8080  gRPC service      (H2C — cleartext HTTP/2)
 #   9090  Prometheus metrics (HTTP/1.1)
+#
+# Platform note: pinned to linux/amd64.
+#   Infer.NET bundles Intel MKL x86-64 native libraries — the image cannot run
+#   on a native ARM64 host regardless of where it is built.  Fixing the platform
+#   here also avoids a linux_arm64/protoc segfault (exit 139) in Grpc.Tools
+#   that occurs when building on Apple Silicon inside a Docker container.
 
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore as a separate layer so the NuGet cache survives source-only changes.
@@ -35,7 +41,7 @@ RUN dotnet publish MACE/MACE.csproj -c Release -o /app/publish
 # Use the debian-based aspnet image — NOT alpine.
 # Infer.NET bundles Intel MKL native libraries that require glibc.
 # musl libc (Alpine) is incompatible with MKL and will crash on startup.
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
 

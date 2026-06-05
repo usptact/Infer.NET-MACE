@@ -21,7 +21,7 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         "VMP inference wall-clock time.",
         new HistogramConfiguration
         {
-            Buckets = new[] { 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0 }
+            Buckets = [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0]
         });
 
     private static readonly Gauge PoolAvailable = Metrics.CreateGauge(
@@ -29,11 +29,11 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
 
     private static readonly Counter InferRequests = Metrics.CreateCounter(
         "mace_infer_requests_total", "Total Infer RPC calls.",
-        new CounterConfiguration { LabelNames = new[] { "status" } });
+        new CounterConfiguration { LabelNames = ["status"] });
 
     private static readonly Counter UpdatePriorsRequests = Metrics.CreateCounter(
         "mace_update_priors_requests_total", "Total UpdatePriors RPC calls.",
-        new CounterConfiguration { LabelNames = new[] { "verdict" } });
+        new CounterConfiguration { LabelNames = ["verdict"] });
 
     // Static stopwatch so uptime is measured from class load (≈ app start),
     // not from request arrival.  The gRPC framework instantiates this class
@@ -41,17 +41,17 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
     private static readonly Stopwatch _uptime = Stopwatch.StartNew();
 
     private static readonly string[] ThreatLevelNames =
-        { "CLEAR", "LOW", "MEDIUM", "HIGH", "CRITICAL" };
+        ["CLEAR", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
     // ── Instance state ────────────────────────────────────────────────────────
 
-    private readonly InferencePool      _pool;
+    private readonly IInferencePool     _pool;
     private readonly PriorUpdateService _priorUpdate;
     private readonly InferenceOptions   _opts;
     private readonly ILogger<MaceInferenceGrpcService> _logger;
 
     public MaceInferenceGrpcService(
-        InferencePool pool,
+        IInferencePool pool,
         PriorUpdateService priorUpdate,
         IOptions<InferenceOptions> opts,
         ILogger<MaceInferenceGrpcService> logger)

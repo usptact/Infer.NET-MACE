@@ -172,7 +172,7 @@ namespace MACE
             SetModelData(priors);
 
             // Discrete is a reference type — check for null directly.
-            Discrete[]? warmStartArray = warmStart is not null ? new Discrete[] { warmStart } : null;
+            Discrete[]? warmStartArray = warmStart is not null ? [warmStart] : null;
             InitializeLabels(1, _numCategories.ObservedValue, warmStartArray);
 
             // Set observed data and run VMP.

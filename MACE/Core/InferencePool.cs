@@ -16,7 +16,7 @@ namespace MACE.Core;
 /// reuse the compiled code and are much faster). The pool pays this cost once
 /// at startup and leases slots to requests.
 /// </summary>
-public sealed class InferencePool : IDisposable
+public sealed class InferencePool : IInferencePool, IDisposable
 {
     private readonly SemaphoreSlim              _semaphore;
     private readonly ConcurrentQueue<MACETrain> _available;
@@ -70,7 +70,7 @@ public sealed class InferencePool : IDisposable
         await _semaphore.WaitAsync(ct);
 
         if (_available.TryDequeue(out var trainer))
-            return new PooledInference(trainer, this);
+            return new PooledInference(trainer, () => Return(trainer));
 
         // Invariant violation — semaphore granted but queue empty.
         _semaphore.Release();
@@ -100,17 +100,19 @@ public sealed class InferencePool : IDisposable
 /// <summary>
 /// Scoped lease on a <see cref="MACETrain"/> instance.
 /// Returning it to the pool on Dispose() is deterministic via the using pattern.
+/// The <paramref name="release"/> action decouples this struct from the concrete
+/// pool type, allowing tests to construct leases with a no-op action.
 /// </summary>
 public readonly struct PooledInference : IDisposable
 {
     public MACETrain Inferencer { get; }
-    private readonly InferencePool _pool;
+    private readonly Action _release;
 
-    internal PooledInference(MACETrain inferencer, InferencePool pool)
+    internal PooledInference(MACETrain inferencer, Action release)
     {
         Inferencer = inferencer;
-        _pool      = pool;
+        _release   = release;
     }
 
-    public void Dispose() => _pool.Return(Inferencer);
+    public void Dispose() => _release();
 }
