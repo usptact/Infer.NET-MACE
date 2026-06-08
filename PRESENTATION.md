@@ -22,7 +22,7 @@ The deeper issue is that **sensor reliability is unknown, varies per sensor and 
 
 ## What ThreatSense Does
 
-ThreatSense fuses heterogeneous sensor events into a single probabilistic threat score per incident, while simultaneously learning which sensors are trustworthy. It gets smarter with every operator verdict.
+ThreatSense fuses heterogeneous sensor events into a single probabilistic threat score per incident, while simultaneously learning which sensors are trustworthy.
 
 Three properties distinguish it from rule-based systems:
 
@@ -41,7 +41,6 @@ Three properties distinguish it from rule-based systems:
 - **Learn** which sensors are reliable over time; update beliefs from operator feedback without retraining
 - Degrade gracefully under load — queue then shed requests, never crash or corrupt state
 - Every score must be **explainable**: traceable to the sensors that drove it and their current reliability
-- Maintain a tamper-evident audit trail of all inferences and operator actions
 
 ---
 
@@ -61,11 +60,11 @@ Three properties distinguish it from rule-based systems:
 | Fixed sensor types | Register new sensor types at runtime; assign uninformative priors until evidence accumulates |
 | Per-type reliability | Hierarchical model: type-level prior + per-device deviation (useful for large fleets) |
 | Binary feedback | Graded verdicts ("mostly correct", "partially triggered"); per-sensor override by operator |
-| No temporal decay | Decay annotation weight as incident age grows; parametric half-life per sensor type |
+| No temporal decay | Decay sensor reading weight as incident age grows; parametric half-life per sensor type |
 | Single premises | Multi-premises federation; shared type-level priors, separate device-level beliefs |
 | Discrete threat levels | Continuous score as posterior expected value `E[T]`; ordinal regression extension |
 
-The model is intentionally minimal. Complexity is added only when evidence from deployment shows it is needed.
+The model is intentionally minimal.
 
 ---
 
@@ -78,7 +77,7 @@ The answer comes from a Bayesian graphical model. Each sensor carries a prior be
 1. The most probable threat level, given all available sensor readings
 2. For each sensor: how likely is it that *this sensor* is behaving reliably *on this incident*
 
-These two questions are solved simultaneously. The sensor readings that agree with the inferred threat level are judged more reliable; those that disagree are judged less reliable. No rules, no thresholds, no manual weights.
+These two questions are solved simultaneously. The sensor readings that agree with the inferred threat level are judged more reliable; those that disagree are judged less reliable.
 
 **Sensor reliability as a learned quantity.** Each sensor type has a Beta-distributed reliability prior — `Beta(α, β)` — where `α` accumulates evidence of unreliable behavior and `β` accumulates evidence of reliable behavior. Reference points:
 
@@ -88,11 +87,9 @@ These two questions are solved simultaneously. The sensor readings that agree wi
 | `Beta(5, 5)` — mean fault rate 50% | Unknown; neutral cold-start for a new sensor |
 | `Beta(9, 1)` — mean fault rate 90% | Highly unreliable; almost always disagrees |
 
-After each incident and operator verdict, these priors are updated. The changes are small per incident but compound over hundreds of incidents into a precise, evidence-based reliability profile for every sensor in the facility.
+After each incident and operator verdict, these priors are updated. The changes are small per incident but compound over hundreds of incidents.
 
 ### The model in brief
-
-Five quantities, explained in plain terms:
 
 | Variable | What it represents | Technical form |
 |---|---|---|
@@ -104,9 +101,9 @@ Five quantities, explained in plain terms:
 
 The model assumes: if a sensor is **reliable** on this incident, it will report the true threat level. If it is **unreliable**, it will report something according to its own bias distribution — which may be consistently too low, too high, or random noise.
 
-Given all the sensor readings, Bayesian inference works backwards: it finds the threat level T[i] and the per-sensor reliability indicators S[i,j] that best explain what was collectively observed. Sensors whose readings are consistent with the inferred threat level are rewarded; sensors that contradict it are penalized.
+Given all the sensor readings (and operator feedback), Bayesian inference works backwards: it finds the threat level T[i] and the per-sensor reliability indicators S[i,j] that best explain what was collectively observed. Sensors whose readings are consistent with the inferred threat level are rewarded; sensors that contradict it are penalized.
 
-**Online operation.** The model runs in streaming mode — one incident at a time, as sensor events arrive. Each time a new sensor fires for an active incident, inference re-runs immediately with the updated annotation. The result from the previous run is used as the starting point for the next, so convergence is fast for incremental updates. When an incident closes and the operator provides a verdict, the long-term reliability priors (θ[j]) are updated and persist into all future incidents. The inference pod itself is stateless — it receives priors and annotations as inputs and returns posteriors. All persistence lives in the Belief Store.
+**Online operation.** The model runs in streaming mode — one incident at a time, as sensor events arrive. Each time a new sensor fires for an active incident, inference re-runs immediately with the updated sensor reading. The result from the previous run is used as the starting point for the next, so convergence is fast for incremental updates. When an incident closes and the operator provides a verdict, the long-term reliability priors (θ[j]) are updated and persist into all future incidents.
 
 ---
 
@@ -130,8 +127,6 @@ A sensor that is reliable in one context may be unreliable in another. The model
 
 No one configured this distinction. No one wrote a rule. The system learned it from the pattern of disagreements and operator verdicts across two different deployment contexts.
 
-This is the property that makes MACE suitable for long-running deployed systems: the model gets better at every facility it is deployed in, and improves throughout its operational lifetime.
-
 ---
 
 ## System Architecture
@@ -153,7 +148,7 @@ This is the property that makes MACE suitable for long-running deployed systems:
                   │ Incident Manager│  cluster · buffer · trigger
                   └────────┬────────┘
           ┌────────────────┤
-          │  priors        │  annotation vector
+          │  priors        │  sensor reading vector
           ▼                ▼
   ┌──────────────┐  ┌──────────────────────┐
   │ Belief Store │  │ MACE Inference Service│  VMP · pool · stateless
@@ -202,7 +197,7 @@ POST /api/v1/incidents/{id}/feedback            # submit TRUE_ALARM / FALSE_ALAR
 
 ### Inference Pod (internal gRPC, also testable via FastAPI gateway)
 ```
-Infer         — run VMP, return t_dist + per-sensor reliability
+Infer         — run VMP, return threat_dist + per-sensor reliability
 UpdatePriors  — compute updated Beta priors after a verdict
 Health        — liveness probe
 ```
@@ -220,7 +215,7 @@ Receives raw sensor outputs and transforms them into a canonical 4-bit threat la
 | Sensor | Mapping |
 |---|---|
 | Camera — P(unknown person) | `[0.30, 0.60, 0.85]` → labels 0/1/2/3 |
-| Microphone — P(gunshot) | `[0.20, 0.50, 0.75]` → 0/1/2/3; reverb flag caps at 2 |
+| Microphone — P(gunshot) | `[0.20, 0.50, 0.75]` → 0/1/2/3 |
 | Glass-break detector | Confidence > 0.5 → label 3 (HIGH); always |
 | Badge reader | Valid + business hours → 0; Invalid + off-hours → 3 |
 | Time context | Business hours → 0; late night → 2 (ambient risk) |
@@ -231,7 +226,7 @@ A per-sensor **token bucket** prevents burst floods from misconfigured sensors f
 
 ### Incident Manager
 
-Groups sensor events into incidents using a **temporal-spatial window**: events in the same zone within 60 seconds of each other are part of the same incident. The annotation matrix per incident is a fixed-length integer array (one slot per sensor type), updated with `MAX` when multiple events from the same sensor arrive — a conservative policy that escalates rather than averages.
+Groups sensor events into incidents using a **temporal-spatial window**: events in the same zone within 60 seconds of each other are part of the same incident. The sensor reading vector per incident has one slot per sensor type; when a sensor fires multiple times, the most severe reading is kept — a conservative policy that escalates rather than averages.
 
 **Re-inference trigger policy** avoids thrashing:
 - High-priority events (glass break, forced door, weapon detection): immediate inference
@@ -246,10 +241,10 @@ The system is designed to accommodate new sensor types without code changes to t
 **Steps to add a new sensor type** (e.g. thermal camera, radar, or LiDAR):
 
 1. Register the sensor type in the Sensor Gateway with a discretization function (how do raw scores map to 0–4?) and an initial prior — `Beta(1, 9)` if the hardware is well-characterized and known to be accurate, `Beta(5, 5)` if unknown.
-2. Extend the annotation vector length from 7 to 8 (or however many types now exist). All existing inferences pass `-1` for the new slot; the model treats absence as missing data and is unaffected.
+2. Extend the sensor reading vector length from 7 to 8 (or however many types now exist). All existing inferences pass `-1` for the new slot; the model treats absence as missing data and is unaffected.
 3. As incidents accumulate, the new sensor's prior updates from evidence like any other.
 
-New sensors start at 50% reliability (neutral prior) and earn trust — or lose it — purely from their record. There is no privileged position for any sensor type. A cheap door sensor that consistently agrees with outcomes can become more trusted than an expensive CV system that fires on shadows.
+New sensors start at 50% reliability (neutral prior) and earn trust — or lose it — purely from their record. A cheap door sensor that consistently agrees with outcomes can become more trusted than an expensive CV system that fires on shadows.
 
 The only constraint: the number of sensor types must be fixed per deployment and known at pod startup (it determines the size of the compiled factor graph). Changing it requires a pod restart with a new configuration. Dynamic hot-addition of sensor types is a future extension.
 
@@ -257,17 +252,15 @@ The only constraint: the number of sensor types must be fixed per deployment and
 
 ### MACE Inference Service
 
-The stateless gRPC pod that runs the Bayesian inference. Design decisions worth explaining:
+The stateless gRPC pod that runs the Bayesian inference.
 
-**Stateless by design.** Every call receives all the data it needs: the annotation vector and the current Beta/Dirichlet priors loaded by the caller from the Belief Store. The pod stores nothing between calls. This means it can be scaled horizontally, restarted without data loss, and tested with synthetic inputs without a database connection.
+**Stateless by design.** Every call receives all the data it needs: the sensor reading vector and the current Beta/Dirichlet priors loaded by the caller from the Belief Store. The pod stores nothing between calls. This means it can be scaled horizontally, restarted without data loss, and tested with synthetic inputs without a database connection.
 
 **Concurrent requests via an engine pool.** Inference is CPU-intensive and not safely shareable across concurrent calls. A fixed pool of pre-warmed inference engines is maintained at startup. Each request borrows one exclusively, uses it, and returns it. Pool depth = maximum concurrent incidents the pod can serve simultaneously.
 
 **Pool saturation is graceful.** When all engines are busy, new requests queue. If a slot is not available within the configured timeout (default 5 s), the pod returns `UNAVAILABLE`. Callers can retry; no crash, no data corruption, no stale state.
 
 **Warm-starting.** When the same incident is re-inferred as new sensors fire, the probability distribution from the previous call can be passed back as a starting point. The inference algorithm converges faster when initialized near the previous answer, typically reducing wall time by 2–4×.
-
-**What the pod deliberately does not do:** connect to any database, manage incident state, discretize sensor readings, or trigger alerts. These are all upstream/downstream concerns. The pod's contract is: *given annotations and priors, return posteriors*.
 
 ---
 
@@ -295,9 +288,9 @@ After an operator closes an incident, the Feedback Processor updates the Beta pr
 
 | Condition | Update | Interpretation |
 |---|---|---|
-| TRUE\_ALARM + sensor flagged (annotation ≥ MEDIUM) | `β += lr × (1 − fault_prob)` | Reliable sensor: reinforce |
+| TRUE\_ALARM + sensor flagged (reading ≥ MEDIUM) | `β += lr × (1 − fault_prob)` | Reliable sensor: reinforce |
 | FALSE\_ALARM + sensor flagged | `α += lr × fault_prob` | Sensor cried wolf: penalize |
-| TRUE\_ALARM + sensor missed (annotation < MEDIUM) | `α += lr × 0.3` | Sensor missed threat: penalize slightly |
+| TRUE\_ALARM + sensor missed (reading < MEDIUM) | `α += lr × 0.3` | Sensor missed threat: penalize slightly |
 | FALSE\_ALARM + sensor stayed quiet | `β += lr × 0.3` | Sensor correctly quiet: reinforce slightly |
 
 `lr` (learning rate, default 0.5) controls how aggressively a single incident shifts the global prior. Updated priors are written back to the Belief Store and used in all subsequent inferences.
@@ -322,13 +315,13 @@ With only 2 of 7 sensors present, and both individually weak evidence, the syste
 - Camera: HIGH · Microphone: MEDIUM · Door sensor: LOW
 - Result: threat=HIGH, confidence=**72%**, entropy=0.75 — *Alert operator*
 
-Camera and time context agree on HIGH. The microphone reported MEDIUM — one level below the consensus. MACE immediately marks the microphone as **94% likely-spamming on this incident**: it disagrees with the majority, so its reading is down-weighted. The door sensor reported LOW (missed the threat) and is similarly discounted. The alert fires.
+Camera and time context agree on HIGH. The microphone reported MEDIUM — one level below the consensus. MACE immediately marks the microphone as **94% likely faulty on this incident**: it disagrees with the majority, so its reading is down-weighted. The door sensor reported LOW (missed the threat) and is similarly discounted. The alert fires.
 
 **Step 3 — Operator confirms TRUE\_ALARM**
 
 After the operator verdict, priors update:
 - Camera `β` increases significantly — it correctly flagged HIGH with low fault probability
-- Microphone `β` barely increases — it flagged the threat (annotation ≥ MEDIUM) but was judged 94% likely faulty, so it receives almost no credit
+- Microphone `β` barely increases — it flagged the threat (reading ≥ MEDIUM) but was judged 94% likely faulty, so it receives almost no credit
 - Door sensor `α` increases — it missed the threat entirely
 
 **Step 4 — Adjacent zone: glass break** *(separate incident)*
@@ -373,11 +366,9 @@ Measurements on a single development machine (Docker, Apple Silicon equivalent):
 | Pool = 4 | ~13 req/s | 0.39 s | 96 concurrent |
 | Pool = 4, sustained 3 min | 13–14 req/s | — | 0 errors, flat memory |
 
-**Scaling is 2.5× for 4× pool slots** — not linear, because the FastAPI HTTP→gRPC gateway and the single-core gRPC network layer become co-bottlenecks. CPU scales nearly linearly (4× pool ≈ 4× CPU cores used) because each VMP inference slot runs its own Intel MKL linear algebra threads independently.
+**Scaling is 2.5× for 4× pool slots** — not linear, because the FastAPI HTTP→gRPC gateway and the single-core gRPC network layer become co-bottlenecks. CPU scales nearly linearly (4× pool ≈ 4× CPU cores used).
 
 **Memory** is dominated by the Infer.NET compiled factor graph (~1 GB for pool=1; ~160 MB per additional slot). This is a one-time startup cost, fixed regardless of incident volume. No per-incident data is retained in the inference pod.
-
-**NFR-01 (≤500 ms P99):** Met at pool=4 for up to 32 concurrent incidents per pod. Higher concurrency requires additional pod instances (horizontal scaling).
 
 ---
 
@@ -400,13 +391,13 @@ The built components constitute the **inference core** of ThreatSense — the mo
 
 ## Open Questions
 
-1. **Latency at 7 sensor types.** Current VMP runs in 300–800 ms. The design target is ≤500 ms P99. Warm-starting typically brings this to 300–500 ms. Under adversarial load (pool saturation) P99 approaches 5 s. Mitigation: increase pool size or add pod replicas.
+1. **Latency at 7 sensor types.** Current VMP runs in 300–800 ms. Warm-starting typically brings this to 300–500 ms. Under adversarial load (pool saturation) P99 approaches 5 s. Mitigation: increase pool size or add pod replicas.
 
 2. **Cold-start sensor reliability.** A newly installed sensor starts with a neutral prior `Beta(5,5)` — 50% assumed fault rate — until evidence accumulates. For high-stakes sensors (glass-break), it may be desirable to seed them with an informative prior `Beta(1,9)` based on manufacturer specs.
 
-3. **Temporal decay.** A sensor annotation from 10 minutes ago should carry less weight than one from 10 seconds ago. This is not modeled. One approach: decay annotations toward -1 (absent) as they age, or weight them in a pre-processing step.
+3. **Temporal decay.** A sensor reading from 10 minutes ago should carry less weight than one from 10 seconds ago. This is not modeled. One approach: decay readings toward -1 (absent) as they age, or weight them in a pre-processing step.
 
-4. **Multi-incident correlation.** An active shooter moving through a building creates simultaneous incidents in adjacent zones. Standard MACE treats each incident independently. A multi-item inference window across zones could capture this correlation but significantly increases complexity.
+4. **Multi-incident correlation.** An active shooter moving through a building creates simultaneous incidents in adjacent zones. Standard MACE treats each incident independently. A multi-incident inference window across zones could capture this correlation but significantly increases complexity.
 
 5. **Feedback quality.** The update rules assume operator verdicts are accurate. An operator who habitually confirms false alarms would degrade sensor reliability estimates over time. A confidence weighting on operator feedback (based on the operator's own track record) would mitigate this.
 
