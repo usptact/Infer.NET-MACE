@@ -13,8 +13,10 @@ WORKDIR /app
 COPY test-client/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt grpcio-tools
 
-# Generate gRPC Python stubs from the proto file.
-# Output lands in /app/generated/, matching the path expected by main.py.
+COPY test-client/ ./
+
+# Generate gRPC Python stubs from the proto file — runs after COPY so it
+# always overwrites any stale stubs that may exist in test-client/generated/.
 COPY MACE/Protos/mace_inference.proto /tmp/
 RUN mkdir -p generated && \
     python -m grpc_tools.protoc \
@@ -22,8 +24,6 @@ RUN mkdir -p generated && \
         --python_out=generated \
         --grpc_python_out=generated \
         /tmp/mace_inference.proto
-
-COPY test-client/ ./
 
 EXPOSE 8000
 
