@@ -13,7 +13,7 @@ The MACE inference pod is a **stateless gRPC service** that:
 1. Accepts a flat annotation vector (`int[]`, one entry per sensor type, -1 = absent) together with Beta/Dirichlet priors loaded by the caller from the Belief Store.
 2. Runs Infer.NET VMP inference to produce a posterior distribution over threat levels and per-sensor fault probabilities.
 3. Returns the result; it stores nothing.
-4. Optionally computes updated Beta priors from an operator verdict (pure arithmetic, no Infer.NET).
+4. Optionally computes updated θ (Beta) and φ (Dirichlet) priors from an operator verdict — the model's EM step in closed form (pure arithmetic, no Infer.NET).
 
 **Why stateless?** The pod can be scaled horizontally, restarted without data loss, and tested with synthetic inputs without a database. All prior state lives in the Belief Store (Postgres + Redis), owned by the Feedback Processor.
 
@@ -149,19 +149,23 @@ Creating a new instance per request is too expensive because `CreateModel()` com
 
 ### `MACE/Services/PriorUpdateService.cs` — prior update math
 
-The Bayesian Beta update triggered by operator feedback is pure arithmetic. Separating it from the gRPC service allows independent unit testing and keeps the math explicit and auditable.
+The θ/φ update triggered by operator feedback is the single-incident EM step of
+the MACE model, computed in closed form — pure arithmetic, no Infer.NET.
+Separating it from the gRPC service allows independent unit testing and keeps the
+math explicit and auditable.
 
-Update rules (from THREATSENSE_DESIGN.md §7.5):
+Update rules (from THREATSENSE_DESIGN.md §7.5). For each sensor with reading `a`
+and incident gold level `T`, using prior means `θ̄`, `φ̄`:
 
-| Condition | Update |
-|---|---|
-| TRUE_ALARM + annotation ≥ MEDIUM (≥2) | `β += lr × (1 − faultProbMean)` |
-| FALSE_ALARM + annotation ≥ MEDIUM | `α += lr × faultProbMean` |
-| TRUE_ALARM + annotation < MEDIUM | `α += lr × 0.3` |
-| FALSE_ALARM + annotation < MEDIUM | `β += lr × 0.3` |
-| annotation == -1 | no change |
+| Condition | Fault responsibility `r` | Update |
+|---|---|---|
+| `a == -1` (absent) | — | no change |
+| `a ≠ T` | `1` | `α += lr·1`; `β` unchanged; `φ[a] += lr·1` |
+| `a == T` | `θ̄·φ̄[a] / (θ̄·φ̄[a] + (1 − θ̄))` | `α += lr·r`; `β += lr·(1 − r)`; `φ[a] += lr·r` |
 
-Returns a new immutable `BetaParameters(Alpha, Beta)` record.
+`T` = `CLEAR (0)` for a FALSE_ALARM verdict, else the operator-supplied
+`true_threat_level`. Returns an immutable `BeliefUpdate(BetaParameters Theta,
+double[] Phi)`.
 
 ---
 
@@ -239,18 +243,21 @@ grpcurl -plaintext -d '{
 }' localhost:8080 mace.MaceInference/Infer
 # Expect: threat_level=3, confidence ≥ 0.70
 
-# Prior update after TRUE_ALARM — camera and mic both correctly flagged
+# Prior update after TRUE_ALARM resolved to HIGH(3) — camera and mic both agreed
 grpcurl -plaintext -d '{
   "verdict": "TRUE_ALARM",
   "learning_rate": 0.5,
+  "true_threat_level": 3,
   "sensors": [
-    {"sensor_type_index":0,"sensor_reading":3,"fault_prob_mean":0.09,
-     "current_theta":{"alpha":1,"beta":9}},
-    {"sensor_type_index":1,"sensor_reading":3,"fault_prob_mean":0.12,
-     "current_theta":{"alpha":1,"beta":9}}
+    {"sensor_type_index":0,"sensor_reading":3,
+     "current_theta":{"alpha":1,"beta":9},
+     "current_phi":{"pseudocounts":[1,1,1,1,1]}},
+    {"sensor_type_index":1,"sensor_reading":3,
+     "current_theta":{"alpha":1,"beta":9},
+     "current_phi":{"pseudocounts":[1,1,1,1,1]}}
   ]
 }' localhost:8080 mace.MaceInference/UpdatePriors
-# Expect: beta increases for sensor 0 and 1
+# Expect: reading == gold ⇒ small responsibility ⇒ beta grows, updated_phis returned
 
 # Prometheus metrics
 curl -s localhost:9090/metrics | grep mace_

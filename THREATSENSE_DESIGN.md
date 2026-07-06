@@ -36,7 +36,7 @@ The original MACE model (Hovy et al., NAACL 2013) estimates true labels by aggre
 - Provides full posterior `P(threat_level | all_observations)` — not just a point estimate
 - Learns sensor reliability through prior propagation between incidents
 - Handles conflicting sensor signals probabilistically without ad-hoc weighting rules
-- Operator feedback updates `θ` priors retroactively, improving future inferences
+- Operator feedback updates `θ` and `φ` priors retroactively, improving future inferences
 
 **Threat level discretization:**
 The latent variable `T[i]` takes values in `{0=CLEAR, 1=LOW, 2=MEDIUM, 3=HIGH, 4=CRITICAL}`. Each sensor's raw output is normalized to this 5-level scale via configurable per-sensor thresholds (see Section 7.1).
@@ -166,7 +166,7 @@ The current codebase (`MACETrain.InferModelData`) runs batch VMP inference on a 
                                             ▼
                              ┌───────────────────────────────────┐
                              │      Feedback Processor            │
-                             │  - Beta prior update logic         │
+                             │  - θ/φ prior update (EM step)      │
                              │  - Posterior backpropagation       │
                              │  - Audit log write                 │
                              └───────────────────────────────────┘
@@ -305,9 +305,11 @@ Server push messages:
 POST /api/v1/incidents/{incidentId}/feedback
 Body: {
   "verdict": "TRUE_ALARM",          // or FALSE_ALARM
+  "true_threat_level": "HIGH",      // operator-resolved gold level; required for
+                                    // TRUE_ALARM. FALSE_ALARM is pinned to CLEAR.
   "operator_id": "op-007",
   "notes": "confirmed gunshot on NW camera",
-  "sensor_assessments": [           // optional per-sensor override
+  "sensor_assessments": [           // optional per-sensor override of responsibility
     { "sensor_id": "cam-north-01", "was_correct": true },
     { "sensor_id": "mic-lobby-01", "was_correct": true }
   ]
@@ -316,8 +318,12 @@ Response 200: {
   "feedback_id": "...",
   "priors_updated": ["cam-north-01", "mic-lobby-01"],
   "reliability_deltas": {
-    "cam-north-01": { "before": { "alpha": 2.0, "beta": 8.0 },
-                      "after":  { "alpha": 2.0, "beta": 8.5 } }
+    "cam-north-01": {
+      "theta_before": { "alpha": 2.0, "beta": 8.0 },
+      "theta_after":  { "alpha": 2.06, "beta": 8.44 },
+      "phi_before": [8, 4, 3, 2, 1],
+      "phi_after":  [8, 4, 3, 2.06, 1]
+    }
   }
 }
 ```
@@ -534,25 +540,53 @@ Alert triggered if ALL of:
 
 **Responsibility:** Incorporate operator verdicts to update sensor reliability priors; write immutable audit log.
 
-**Bayesian prior update logic:**
+**Bayesian prior update logic (single-incident EM step):**
 
-`θ[j]` is the spammer probability — a reliable sensor has low `θ`. We represent it as `Beta(α, β)` where `α` counts "spamming" evidence and `β` counts "reliable" evidence.
+Once the operator resolves an incident to a **gold true level** `T`, both reliability
+priors update in closed form — this is the EM step of the MACE generative model
+(`MACETrain.CreateModel`), not a hand-tuned heuristic. `θ[j] ~ Beta(α, β)` is the
+spammer probability (α counts "faulty" evidence, β counts "reliable" evidence);
+`φ[j] ~ Dirichlet(m)` is the label distribution a sensor emits *when* faulty.
 
-| Condition | Update |
-|---|---|
-| TRUE_ALARM + sensor correctly flagged (annotation ≥ MEDIUM) | `β += lr * (1 - S[0][j].GetMean())` — sensor was reliable, reinforce |
-| FALSE_ALARM + sensor flagged threat (annotation ≥ MEDIUM) | `α += lr * S[0][j].GetMean()` — sensor contributed to false alarm |
-| TRUE_ALARM + sensor missed the threat (annotation < MEDIUM) | `α += lr * 0.3` — sensor failed to detect, penalize slightly |
-| FALSE_ALARM + sensor correctly stayed quiet (annotation < MEDIUM) | `β += lr * 0.3` — sensor was correct, reinforce slightly |
+For each sensor `j` with reading `a` (skip absent sensors, `a = -1`), compute the
+**fault responsibility** using the current prior means `θ̄`, `φ̄`:
 
-`lr` = `learning_rate` (configurable, default: 0.5). This controls how aggressively a single incident updates the global prior.
+```
+r = P(faulty | a, T)
+  = 1                                          if a ≠ T   (a reliable sensor must report T; it didn't)
+  = θ̄·φ̄[a] / (θ̄·φ̄[a] + (1 − θ̄))               if a = T   (could be reliable, or faulty-but-emitted-truth)
+```
+
+Then apply the matching conjugate updates, damped by the learning rate:
+
+```
+θ:  α += lr · r,   β += lr · (1 − r)
+φ:  m[a] += lr · r          // only the faulty branch informs φ; only bucket a moves
+```
+
+The gold level comes from the verdict: **FALSE_ALARM** pins `T = CLEAR (0)`;
+**TRUE_ALARM** uses the operator-resolved `true_threat_level`. Because `r` is
+recomputed from `T` (rather than reusing the mid-incident `S[0][j]` posterior), a
+trusted sensor that disagrees with the gold label is fully penalised (`r = 1`),
+and a distrusted one that agrees is credited — the update no longer discounts
+surprising evidence. There is no `MEDIUM` threshold or fixed penalty constant.
+
+`lr` = `learning_rate` (configurable, default: 0.5) damps how aggressively a single
+incident moves the global priors.
 
 **Beta distribution reference points:**
 - `Beta(1, 9)`: mean=0.10 → highly reliable sensor
 - `Beta(5, 5)`: mean=0.50 → neutral / cold-start prior
 - `Beta(9, 1)`: mean=0.90 → highly unreliable sensor (spammer)
 
-**Operator can also submit per-sensor assessments** (FR-19) that override the automatic update. If the operator explicitly marks sensor `j` as "was correct" or "was wrong," that overrides the model-derived `S[0][j]` for the update calculation.
+**Operator can also submit per-sensor assessments** (FR-19) that override the
+model-derived responsibility. If the operator explicitly marks sensor `j` as "was
+correct" (force `r = 0`) or "was wrong" (force `r = 1`), that assessment replaces
+the computed `r` for both the θ and φ updates.
+
+> **Note — no forgetting factor:** both α+β and the φ pseudocounts accumulate
+> monotonically, so priors become progressively harder to move. A decay factor
+> applied to both before each update is planned future work (tracked in `ISSUES.md`).
 
 **Audit log entry (append-only):**
 ```json
@@ -561,11 +595,15 @@ Alert triggered if ALL of:
   "operator_id": "op-007",
   "incident_id": "...",
   "verdict": "TRUE_ALARM",
+  "true_threat_level": 3,
   "sensor_updates": [
     {
       "sensor_id": "cam-north-01",
+      "responsibility": 0.12,
       "theta_before": { "alpha": 2.0, "beta": 8.0 },
-      "theta_after":  { "alpha": 2.0, "beta": 8.5 }
+      "theta_after":  { "alpha": 2.06, "beta": 8.44 },
+      "phi_before": [8, 4, 3, 2, 1],
+      "phi_after":  [8, 4, 3, 2.06, 1]
     }
   ]
 }

@@ -5,66 +5,96 @@ public enum Verdict { TrueAlarm, FalseAlarm }
 public record BetaParameters(double Alpha, double Beta);
 
 /// <summary>
-/// Computes updated Beta priors from operator feedback.
+/// Updated θ (Beta) and φ (Dirichlet) priors for a single sensor type.
+/// </summary>
+public record BeliefUpdate(BetaParameters Theta, double[] Phi);
+
+/// <summary>
+/// Computes updated Beta (θ) and Dirichlet (φ) priors from operator feedback.
 ///
-/// This is pure arithmetic — no Infer.NET required. The update rules follow
-/// THREATSENSE_DESIGN.md §7.5 and interpret the fault indicator posterior S[0][j]
-/// produced by a previous Infer call.
+/// This is pure arithmetic — no Infer.NET required. It implements the
+/// single-incident EM step of the MACE generative model (see
+/// <see cref="MACETrain.CreateModel"/>): once the operator resolves an incident
+/// to a gold true level, the fault responsibility of each sensor is available in
+/// closed form, and the conjugate θ / φ updates follow directly.
+///
+/// Generative model recap for sensor j on this incident:
+///   S ~ Bernoulli(θ)                         // S = 1 ⇒ faulty
+///   reading = trueLevel        if S = 0      // reliable sensor reports the truth
+///   reading ~ Categorical(φ)   if S = 1      // faulty sensor draws from its bias
+///
+/// Given the gold <c>trueLevel</c> and the observed <c>reading</c>, the fault
+/// responsibility is
+///   r = P(S = 1 | reading, trueLevel)
+///     = 1                                            if reading ≠ trueLevel
+///     = θ̄·φ̄[reading] / (θ̄·φ̄[reading] + (1 − θ̄))     if reading = trueLevel
+/// where θ̄, φ̄ are the current prior means. The matching conjugate updates are
+///   θ:  α += r,   β += (1 − r)
+///   φ:  pseudocounts[reading] += r          // only the faulty branch informs φ
+/// each scaled by the learning rate.
 /// </summary>
 public sealed class PriorUpdateService
 {
-    // Annotations >= this value are treated as "flagged a threat"
-    private const int MediumThreshold = 2;
-
     /// <summary>
-    /// Returns a new <see cref="BetaParameters"/> with the Beta distribution
-    /// updated based on whether the sensor's behaviour was consistent with the verdict.
+    /// Returns updated θ and φ priors for one sensor type from a single resolved incident.
     /// </summary>
-    /// <param name="current">Current Beta(α, β) prior for sensor j.</param>
-    /// <param name="faultProbMean">
-    ///   Mean of the fault indicator S[0][j] from the most recent Infer call on this incident.
+    /// <param name="theta">Current Beta(α, β) prior for the sensor's fault rate.</param>
+    /// <param name="phi">
+    ///   Current Dirichlet pseudocounts for the sensor's fault-bias distribution.
+    ///   Length must equal the number of threat levels.
     /// </param>
-    /// <param name="annotation">
-    ///   Discretised label sensor j provided. -1 if sensor was absent.
-    /// </param>
-    /// <param name="verdict">Operator's verdict on the closed incident.</param>
+    /// <param name="reading">Discretised label the sensor produced. -1 if the sensor was absent.</param>
+    /// <param name="trueLevel">Operator-resolved gold threat level for the incident.</param>
     /// <param name="learningRate">
-    ///   Controls how aggressively one incident shifts the prior. Default: 0.5.
+    ///   Damping factor applied to the conjugate counts. 1.0 is the undamped EM step;
+    ///   values in (0, 1) down-weight a single incident's evidence. Default: 0.5.
     /// </param>
-    public BetaParameters UpdateTheta(
-        BetaParameters current,
-        double faultProbMean,
-        int annotation,
-        Verdict verdict,
+    public BeliefUpdate UpdateBeliefs(
+        BetaParameters theta,
+        double[] phi,
+        int reading,
+        int trueLevel,
         double learningRate = 0.5)
     {
-        if (annotation == -1)
-            return current;  // sensor absent — no evidence either way
+        ArgumentNullException.ThrowIfNull(phi);
 
-        double alpha = current.Alpha;
-        double beta  = current.Beta;
-        bool flaggedThreat = annotation >= MediumThreshold;
+        // Sensor absent — no evidence either way; leave both priors untouched.
+        if (reading == -1)
+            return new BeliefUpdate(theta, phi);
 
-        if (verdict == Verdict.TrueAlarm)
+        if (reading < 0 || reading >= phi.Length)
+            throw new ArgumentOutOfRangeException(nameof(reading),
+                $"reading {reading} is outside [0, {phi.Length}).");
+
+        // Fault responsibility r = P(faulty | reading, trueLevel).
+        double r;
+        if (reading != trueLevel)
         {
-            if (flaggedThreat)
-                // Sensor correctly flagged → reinforce reliability (increase β)
-                beta  += learningRate * (1.0 - faultProbMean);
-            else
-                // Sensor missed a real threat → penalise slightly (increase α)
-                alpha += learningRate * 0.3;
+            // A reliable sensor must report the truth; it did not ⇒ certainly faulty.
+            r = 1.0;
         }
-        else  // FalseAlarm
+        else
         {
-            if (flaggedThreat)
-                // Sensor contributed to false alarm → penalise (increase α)
-                alpha += learningRate * faultProbMean;
-            else
-                // Sensor correctly stayed quiet → reinforce (increase β)
-                beta  += learningRate * 0.3;
+            // reading == trueLevel: the reading is consistent with either a reliable
+            // sensor (reports truth) or a faulty one that happened to emit the truth.
+            double thetaMean = theta.Alpha / (theta.Alpha + theta.Beta);
+            double phiSum    = 0.0;
+            for (int i = 0; i < phi.Length; i++) phiSum += phi[i];
+            double phiMean   = phi[reading] / phiSum;
+
+            double faulty   = thetaMean * phiMean;
+            double reliable = 1.0 - thetaMean;   // indicator[reading == trueLevel] = 1 here
+            r = faulty / (faulty + reliable);    // denominator ≥ reliable > 0 for α, β > 0
         }
 
-        return new BetaParameters(alpha, beta);
+        // Conjugate updates, damped by the learning rate.
+        double alpha = theta.Alpha + learningRate * r;
+        double beta  = theta.Beta  + learningRate * (1.0 - r);
+
+        double[] newPhi = (double[])phi.Clone();
+        newPhi[reading] += learningRate * r;   // only the faulty branch, only bucket 'reading'
+
+        return new BeliefUpdate(new BetaParameters(alpha, beta), newPhi);
     }
 
     public static Verdict ParseVerdict(string raw) => raw.ToUpperInvariant() switch

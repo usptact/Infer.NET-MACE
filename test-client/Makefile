@@ -44,10 +44,13 @@ curl-update:
 	  -d '{ \
 	    "verdict": "TRUE_ALARM", \
 	    "learning_rate": 0.5, \
+	    "true_threat_level": 3, \
 	    "sensors": [ \
-	      {"sensor_type_index":0,"annotation":3,"spammer_prob_mean":0.09, \
-	       "current_theta":{"alpha":1,"beta":9}}, \
-	      {"sensor_type_index":1,"annotation":3,"spammer_prob_mean":0.12, \
-	       "current_theta":{"alpha":1,"beta":9}} \
+	      {"sensor_type_index":0,"sensor_reading":3, \
+	       "current_theta":{"alpha":1,"beta":9}, \
+	       "current_phi":{"pseudocounts":[1,1,1,1,1]}}, \
+	      {"sensor_type_index":1,"sensor_reading":3, \
+	       "current_theta":{"alpha":1,"beta":9}, \
+	       "current_phi":{"pseudocounts":[1,1,1,1,1]}} \
 	    ] \
 	  }' | python3 -m json.tool

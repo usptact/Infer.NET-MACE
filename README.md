@@ -374,7 +374,7 @@ dotnet test MACE.Tests/MACE.Tests.csproj --filter "FullyQualifiedName~MaceInfere
 
 | Part | File | Tests | Speed | What's covered |
 |---|---|---|---|---|
-| 1 — Pure logic | `Services/PriorUpdateServiceTests.cs` | 33 | <1 ms each | `UpdateTheta` all four verdict×flagged combinations, boundary at `MediumThreshold`, learning-rate scaling; `ParseVerdict` case-insensitivity and error cases |
+| 1 — Pure logic | `Services/PriorUpdateServiceTests.cs` | 25 | <1 ms each | `UpdateBeliefs` EM step: absent-sensor no-op, fault responsibility for reading-vs-gold agreement/disagreement, θ mass conservation, φ pseudocount update, learning-rate scaling, input immutability, range guards; `ParseVerdict` case-insensitivity and error cases |
 | 1 — Logging | `Logging/ShortClassNameEnricherTests.cs` | 5 | <1 ms each | Namespace stripping, no-namespace passthrough, missing `SourceContext`, property always named `ShortContext` |
 | 2 — Inference core | `Inference/MACETrainTests.cs` | 32 | ~400 ms each | Constructor validation; `SetModelData`/`InitializeLabels` error paths; `InferOnline` output invariants (probs sum to 1, confidence = max, ThreatLevel = argmax, entropy ≥ 0); consensus vs disagreement entropy; warm-start; `InferModelData` shape |
 | 3 — Pool | `Core/InferencePoolTests.cs` | 13 | <5 ms each* | Acquire/release `Available` counter; all-slots sequential and concurrent acquisition; pool-exhaustion cancellation; extra task unblocks when slot released; `ObjectDisposedException` on disposed pool; idempotent `Dispose` |

@@ -141,15 +141,26 @@ class InferResponse(BaseModel):
 
 class SensorPriorUpdate(BaseModel):
     sensor_type_index: int
-    sensor_reading:    int   = Field(..., description="-1 if sensor was absent")
-    fault_prob_mean:   float = Field(..., ge=0, le=1)
+    sensor_reading:    int = Field(..., description="-1 if sensor was absent")
     current_theta:     BetaParams
+    current_phi:       DirichletParams
+    fault_prob_mean:   float = Field(
+        0.0, ge=0, le=1,
+        description="DEPRECATED — ignored by the EM update; retained for compatibility.",
+    )
 
 
 class UpdatePriorsRequest(BaseModel):
-    verdict:       str   = Field(..., description='"TRUE_ALARM" or "FALSE_ALARM"')
-    learning_rate: float = Field(0.5, gt=0, le=1)
-    sensors:       List[SensorPriorUpdate]
+    verdict:           str   = Field(..., description='"TRUE_ALARM" or "FALSE_ALARM"')
+    learning_rate:     float = Field(0.5, gt=0, le=1)
+    true_threat_level: int   = Field(
+        0, ge=0,
+        description=(
+            "Operator-resolved gold threat level for the incident. Used when "
+            'verdict is "TRUE_ALARM"; a "FALSE_ALARM" pins the gold level to CLEAR (0).'
+        ),
+    )
+    sensors:           List[SensorPriorUpdate]
 
 
 class UpdatedThetaItem(BaseModel):
@@ -158,8 +169,14 @@ class UpdatedThetaItem(BaseModel):
     beta:              float
 
 
+class UpdatedPhiItem(BaseModel):
+    sensor_type_index: int
+    pseudocounts:      List[float]
+
+
 class UpdatePriorsResponse(BaseModel):
     updated_thetas: List[UpdatedThetaItem]
+    updated_phis:   List[UpdatedPhiItem]
 
 
 class HealthResponse(BaseModel):
@@ -220,14 +237,16 @@ async def infer(req: InferRequest):
 @app.post("/update-priors", response_model=UpdatePriorsResponse, tags=["Priors"])
 async def update_priors(req: UpdatePriorsRequest):
     """
-    Compute updated Beta priors after an operator verdict.
+    Compute updated θ (Beta) and φ (Dirichlet) priors after an operator verdict.
 
-    Does not use Infer.NET — pure arithmetic. Supply the fault posteriors
-    from the most recent `/infer` response for the closed incident.
+    Does not use Infer.NET — pure arithmetic. Implements the single-incident EM
+    step: supply each sensor's current θ and φ priors plus the gold true level
+    for the closed incident (`true_threat_level`, or CLEAR for a FALSE_ALARM).
     """
     grpc_req = pb2.UpdatePriorsRequest(
         verdict=req.verdict,
         learning_rate=req.learning_rate,
+        true_threat_level=req.true_threat_level,
         sensors=[
             pb2.SensorPriorUpdate(
                 sensor_type_index=s.sensor_type_index,
@@ -236,6 +255,9 @@ async def update_priors(req: UpdatePriorsRequest):
                 current_theta=pb2.BetaParams(
                     alpha=s.current_theta.alpha,
                     beta=s.current_theta.beta,
+                ),
+                current_phi=pb2.DirichletParams(
+                    pseudocounts=s.current_phi.pseudocounts,
                 ),
             )
             for s in req.sensors
@@ -255,7 +277,14 @@ async def update_priors(req: UpdatePriorsRequest):
                 beta=t.beta,
             )
             for t in resp.updated_thetas
-        ]
+        ],
+        updated_phis=[
+            UpdatedPhiItem(
+                sensor_type_index=p.sensor_type_index,
+                pseudocounts=list(p.pseudocounts),
+            )
+            for p in resp.updated_phis
+        ],
     )
 
 
