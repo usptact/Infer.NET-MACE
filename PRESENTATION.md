@@ -166,7 +166,7 @@ No one configured this distinction. No one wrote a rule. The system learned it f
                                │  TRUE_ALARM / FALSE_ALARM
                                ▼
                     ┌──────────────────────┐
-                    │  Feedback Processor  │  Beta update · audit log
+                    │  Feedback Processor  │  θ/φ update · audit log
                     └──────────────────────┘
 ```
 
@@ -198,7 +198,7 @@ POST /api/v1/incidents/{id}/feedback            # submit TRUE_ALARM / FALSE_ALAR
 ### Inference Pod (internal gRPC, also testable via FastAPI gateway)
 ```
 Infer         — run VMP, return threat_dist + per-sensor reliability
-UpdatePriors  — compute updated Beta priors after a verdict
+UpdatePriors  — compute updated θ (Beta) and φ (Dirichlet) priors after a verdict
 Health        — liveness probe
 ```
 
@@ -284,16 +284,14 @@ entropy      = H(T[i])               uncertainty — high entropy = conflicting 
 
 ### Feedback Processor & Belief Store
 
-After an operator closes an incident, the Feedback Processor updates the Beta prior `θ[j] = Beta(α_j, β_j)` for each sensor that participated:
+After an operator closes an incident and resolves it to a **gold true level** `T`, the Feedback Processor runs the model's single-incident EM step, updating **both** the reliability prior `θ[j] = Beta(α_j, β_j)` and the fault-bias prior `φ[j] = Dirichlet(m_j)` for each sensor that participated. For a sensor with reading `a`, it first computes the fault responsibility `r`:
 
-| Condition | Update | Interpretation |
-|---|---|---|
-| TRUE\_ALARM + sensor flagged (reading ≥ MEDIUM) | `β += lr × (1 − fault_prob)` | Reliable sensor: reinforce |
-| FALSE\_ALARM + sensor flagged | `α += lr × fault_prob` | Sensor cried wolf: penalize |
-| TRUE\_ALARM + sensor missed (reading < MEDIUM) | `α += lr × 0.3` | Sensor missed threat: penalize slightly |
-| FALSE\_ALARM + sensor stayed quiet | `β += lr × 0.3` | Sensor correctly quiet: reinforce slightly |
+| Case | Fault responsibility `r` | θ / φ update | Interpretation |
+|---|---|---|---|
+| `a = T` (agreed with gold) | `θ̄·φ̄[a] / (θ̄·φ̄[a] + (1 − θ̄))` — small | `β += lr·(1−r)`, `α += lr·r`, `φ[a] += lr·r` | Sensor was right: reinforce reliability |
+| `a ≠ T` (disagreed with gold) | `1` | `α += lr`, `φ[a] += lr` | Sensor was wrong: penalize, and learn *what* it emits when faulty |
 
-`lr` (learning rate, default 0.5) controls how aggressively a single incident shifts the global prior. Updated priors are written back to the Belief Store and used in all subsequent inferences.
+`T = CLEAR` for a FALSE\_ALARM; the operator-resolved level for a TRUE\_ALARM. `lr` (learning rate, default 0.5) damps how aggressively a single incident shifts the global priors. Because `r` is recomputed against the gold label, there is no MEDIUM threshold or fixed penalty constant, and a trusted sensor that disagrees is penalized in full. Updated priors are written back to the Belief Store and used in all subsequent inferences.
 
 The Belief Store also maintains a **posterior snapshot log** — an append-only record of every inference result, every operator action, and every prior change, forming a complete auditable history of the system's reasoning.
 
@@ -319,10 +317,10 @@ Camera and time context agree on HIGH. The microphone reported MEDIUM — one le
 
 **Step 3 — Operator confirms TRUE\_ALARM**
 
-After the operator verdict, priors update:
-- Camera `β` increases significantly — it correctly flagged HIGH with low fault probability
-- Microphone `β` barely increases — it flagged the threat (reading ≥ MEDIUM) but was judged 94% likely faulty, so it receives almost no credit
-- Door sensor `α` increases — it missed the threat entirely
+The operator resolves the incident to gold level **HIGH**. Priors update against that label:
+- Camera read HIGH = gold → responsibility ≈ 0 → `β` increases significantly (reliability reinforced)
+- Microphone read MEDIUM ≠ gold → responsibility = 1 → `α` increases (penalized for disagreeing), and its `φ` gains mass at MEDIUM — the system starts learning that this mic *under-reads* when faulty
+- Door sensor read LOW ≠ gold → responsibility = 1 → `α` increases, and its `φ` gains mass at LOW
 
 **Step 4 — Adjacent zone: glass break** *(separate incident)*
 - Camera: CRITICAL · Glass-break detector: CRITICAL · Microphone: HIGH
@@ -344,7 +342,7 @@ The more interesting story is what happens to sensor priors across hundreds of i
 
 **The microphone's reliability history in the north corridor:**
 
-After 3 months and ~120 incidents, the north corridor microphone has a pattern: on clear-cut alarms confirmed by cameras, it consistently reports one level below the camera. Operators always confirm TRUE\_ALARM. Each time, the microphone is judged a low-credit participant — it flagged something, but disagreed with the consensus level. Its `β` grows slowly, `α` never declines much. After 120 incidents its mean fault rate settles around **35%** — the system has learned that this microphone *tends to under-read*, but is not completely dismissed.
+After 3 months and ~120 incidents, the north corridor microphone has a pattern: on clear-cut alarms confirmed by cameras, it consistently reports one level below the camera. Operators always confirm TRUE\_ALARM, resolving each to the gold level the camera saw. Because the mic's reading disagrees with that gold level every time, its `α` climbs and its fault rate `θ` rises — but the more important thing the system learns lives in `φ`: the mic's fault-bias distribution becomes sharply peaked *one level below the truth*. The system hasn't just learned "this mic is often wrong"; it has learned **the shape of its error** — a systematic under-read — so future inferences can partially discount and correct for it rather than discarding the mic outright.
 
 **The same microphone model in the server room:**
 

@@ -113,6 +113,14 @@ public sealed class GrpcServiceFixture : IDisposable
         return req;
     }
 
+    /// A uniform Dirichlet φ prior of the fixture's threat-level length.
+    public static DirichletParams UniformPhi()
+    {
+        var phi = new DirichletParams();
+        phi.Pseudocounts.AddRange(Enumerable.Repeat(1.0, NumThreatLevels));
+        return phi;
+    }
+
     public static ModelData UniformPriors() => new()
     {
         ThetaDist = Enumerable.Repeat(new Beta(1.0, 1.0), NumSensorTypes).ToArray(),
@@ -343,16 +351,21 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
 
     // ── UpdatePriors ──────────────────────────────────────────────────────────
 
+    private static SensorPriorUpdate Sensor(int index, int reading, double alpha = 1.0, double beta = 9.0)
+        => new()
+        {
+            SensorTypeIndex = index,
+            SensorReading   = reading,
+            CurrentTheta    = new BetaParams { Alpha = alpha, Beta = beta },
+            CurrentPhi      = GrpcServiceFixture.UniformPhi()
+        };
+
     [Fact]
     public async Task UpdatePriors_UnknownVerdict_ThrowsInvalidArgument()
     {
         var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
         var req = new UpdatePriorsRequest { Verdict = "MAYBE_ALARM", LearningRate = 0.5 };
-        req.Sensors.Add(new SensorPriorUpdate
-        {
-            SensorTypeIndex = 0, SensorReading = 3, FaultProbMean = 0.1,
-            CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
-        });
+        req.Sensors.Add(Sensor(0, reading: 3));
 
         Func<Task> act = () => svc.UpdatePriors(req, GrpcServiceFixture.Ctx());
         (await act.Should().ThrowAsync<RpcException>())
@@ -362,42 +375,84 @@ public class MaceInferenceGrpcServiceTests : IClassFixture<GrpcServiceFixture>
     [Theory]
     [InlineData("TRUE_ALARM")]
     [InlineData("FALSE_ALARM")]
-    public async Task UpdatePriors_ValidVerdict_UpdatedThetasCountMatchesSensors(string verdict)
+    public async Task UpdatePriors_ValidVerdict_ReturnsUpdatedThetasAndPhisPerSensor(string verdict)
     {
         var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
-        var req = new UpdatePriorsRequest { Verdict = verdict, LearningRate = 0.5 };
-        req.Sensors.Add(new SensorPriorUpdate
-        {
-            SensorTypeIndex = 0, SensorReading = 3, FaultProbMean = 0.1,
-            CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
-        });
-        req.Sensors.Add(new SensorPriorUpdate
-        {
-            SensorTypeIndex = 1, SensorReading = 3, FaultProbMean = 0.1,
-            CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
-        });
+        var req = new UpdatePriorsRequest { Verdict = verdict, LearningRate = 0.5, TrueThreatLevel = 0 };
+        req.Sensors.Add(Sensor(0, reading: 3));
+        req.Sensors.Add(Sensor(1, reading: 3));
 
         var resp = await svc.UpdatePriors(req, GrpcServiceFixture.Ctx());
 
         resp.UpdatedThetas.Should().HaveCount(2);
+        resp.UpdatedPhis.Should().HaveCount(2);
+        resp.UpdatedPhis.Should().AllSatisfy(p =>
+            p.Pseudocounts.Should().HaveCount(GrpcServiceFixture.NumThreatLevels));
     }
 
     [Fact]
     public async Task UpdatePriors_DefaultLearningRate_UsesHalfPointFive()
     {
-        // LearningRate = 0 in the request → service falls back to 0.5
+        // LearningRate = 0 in the request → service falls back to 0.5.
+        // reading (3) ≠ gold (0) ⇒ responsibility r = 1 ⇒ alpha += lr, beta unchanged.
         var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
-        var req = new UpdatePriorsRequest { Verdict = "TRUE_ALARM", LearningRate = 0 };
-        req.Sensors.Add(new SensorPriorUpdate
-        {
-            SensorTypeIndex = 0, SensorReading = 3, FaultProbMean = 0.1,
-            CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
-        });
+        var req = new UpdatePriorsRequest { Verdict = "TRUE_ALARM", LearningRate = 0, TrueThreatLevel = 0 };
+        req.Sensors.Add(Sensor(0, reading: 3, alpha: 1.0, beta: 9.0));
 
         var resp = await svc.UpdatePriors(req, GrpcServiceFixture.Ctx());
 
-        // With lr=0.5 and TrueAlarm+flagged: beta += 0.5 * (1 - 0.1) = 0.45
-        resp.UpdatedThetas[0].Beta.Should().BeApproximately(9.45, precision: 1e-10);
+        resp.UpdatedThetas[0].Alpha.Should().BeApproximately(1.5, precision: 1e-10);
+        resp.UpdatedThetas[0].Beta.Should().Be(9.0);
+        resp.UpdatedPhis[0].Pseudocounts[3].Should().BeApproximately(1.5, precision: 1e-10);
+    }
+
+    [Fact]
+    public async Task UpdatePriors_FalseAlarmPinsGoldToClear()
+    {
+        // FALSE_ALARM forces gold = CLEAR(0) regardless of true_threat_level.
+        // A sensor that read CLEAR(0) therefore matches gold; one that read HIGH(3)
+        // disagrees and is penalised (alpha grows by the full learning rate).
+        var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
+        var req = new UpdatePriorsRequest { Verdict = "FALSE_ALARM", LearningRate = 1.0, TrueThreatLevel = 4 };
+        req.Sensors.Add(Sensor(0, reading: 0, alpha: 1.0, beta: 9.0)); // matched gold
+        req.Sensors.Add(Sensor(1, reading: 3, alpha: 1.0, beta: 9.0)); // disagreed with gold
+
+        var resp = await svc.UpdatePriors(req, GrpcServiceFixture.Ctx());
+
+        resp.UpdatedThetas[1].Alpha.Should().BeApproximately(2.0, precision: 1e-10); // r=1 ⇒ +lr
+        resp.UpdatedThetas[0].Alpha.Should().BeLessThan(resp.UpdatedThetas[1].Alpha); // matched ⇒ smaller r
+    }
+
+    [Fact]
+    public async Task UpdatePriors_MissingCurrentPhi_ThrowsInvalidArgument()
+    {
+        var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
+        var req = new UpdatePriorsRequest { Verdict = "TRUE_ALARM", LearningRate = 0.5, TrueThreatLevel = 0 };
+        req.Sensors.Add(new SensorPriorUpdate
+        {
+            SensorTypeIndex = 0, SensorReading = 3,
+            CurrentTheta    = new BetaParams { Alpha = 1.0, Beta = 9.0 }
+            // CurrentPhi omitted
+        });
+
+        Func<Task> act = () => svc.UpdatePriors(req, GrpcServiceFixture.Ctx());
+        (await act.Should().ThrowAsync<RpcException>())
+            .Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
+    }
+
+    [Fact]
+    public async Task UpdatePriors_TrueThreatLevelOutOfRange_ThrowsInvalidArgument()
+    {
+        var svc = _fx.BuildService(GrpcServiceFixture.IdlePool().Object);
+        var req = new UpdatePriorsRequest
+        {
+            Verdict = "TRUE_ALARM", LearningRate = 0.5, TrueThreatLevel = 99
+        };
+        req.Sensors.Add(Sensor(0, reading: 3));
+
+        Func<Task> act = () => svc.UpdatePriors(req, GrpcServiceFixture.Ctx());
+        (await act.Should().ThrowAsync<RpcException>())
+            .Which.StatusCode.Should().Be(StatusCode.InvalidArgument);
     }
 
     // ── Health ────────────────────────────────────────────────────────────────

@@ -68,6 +68,15 @@ docker compose up --build -d
 
 A six-step scenario covering two active incidents, two operator verdicts, and a final all-clear sweep. Priors accumulate across incidents, showing online learning in action.
 
+> **Regenerated live against Fix B (EM feedback update).** The `UpdatePriors` steps run the
+> model's single-incident **EM step**, updating **both** θ (Beta) and φ (Dirichlet) from the
+> operator-resolved **gold true level** (see THREATSENSE_DESIGN.md §7.5). Every number below
+> was captured from a live end-to-end run against the Dockerised service, with **both θ and φ
+> propagated** across incidents: each `Infer` step is fed the accumulated priors produced by the
+> preceding `UpdatePriors` step (a sensor absent from an incident keeps its prior unchanged).
+> The `Infer` (VMP) path is unchanged by Fix B, so its posteriors match earlier runs; the
+> feedback steps and everything downstream of them reflect the new EM update.
+
 Initial sensor priors reflect a mixed-confidence starting state: cameras and microphones are considered more reliable (Beta(1,9) → mean 10% fault rate), badge and door sensors are neutral, and time-context is treated with moderate skepticism (Beta(3,7) → mean 30% fault rate) because "late night = suspicious" is contextual, not authoritative.
 
 ---
@@ -118,14 +127,14 @@ curl -s -X POST http://localhost:8000/infer \
         {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob": 0.5172, "reliability": 0.4828}
     ],
     "num_observations": 2,
-    "inference_ms": 3902
+    "inference_ms": 2210
 }
 ```
 
 > **Analysis:** MACE leans HIGH (52%) but with substantial uncertainty — entropy 1.10 out of max 1.61 nats.
 > With only two sensors and both already suspected of being unreliable (badge reader: 69% fault, time context: 52% fault),
 > the model has too little information to commit. This is a "watch and wait" signal, not an alert.
-> The 2.25s is the Infer.NET Roslyn JIT on first call — all subsequent calls run in ~400–900ms.
+> The ~2.2s is the Infer.NET Roslyn JIT on first call — all subsequent calls run in ~500–900ms.
 
 ---
 
@@ -177,7 +186,7 @@ curl -s -X POST http://localhost:8000/infer \
         {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob": 0.3368, "reliability": 0.6632}
     ],
     "num_observations": 5,
-    "inference_ms": 1454
+    "inference_ms": 784
 }
 ```
 
@@ -194,7 +203,9 @@ curl -s -X POST http://localhost:8000/infer \
 
 Security dispatch confirms an unknown person — real intrusion. Operator closes the incident as `TRUE_ALARM`.
 
-Pass the `fault_prob` posteriors from Step 2's response back to UpdatePriors to compute new Beta parameters. These updated priors will be injected into the next incident's `theta_priors`.
+The operator resolves the incident to gold level **HIGH (3)**. UpdatePriors runs the EM
+step against that label — no `fault_prob` needed. Each sensor supplies its current θ and φ;
+the updated priors are injected into the next incident's `theta_priors` / `phi_priors`.
 
 ```bash
 curl -s -X POST http://localhost:8000/update-priors \
@@ -202,17 +213,18 @@ curl -s -X POST http://localhost:8000/update-priors \
   -d '{
     "verdict": "TRUE_ALARM",
     "learning_rate": 0.5,
+    "true_threat_level": 3,
     "sensors": [
-      {"sensor_type_index": 0, "sensor_reading": 3, "fault_prob_mean": 0.2956,
-       "current_theta": {"alpha": 1.0, "beta": 9.0}},
-      {"sensor_type_index": 1, "sensor_reading": 2, "fault_prob_mean": 0.9444,
-       "current_theta": {"alpha": 1.0, "beta": 9.0}},
-      {"sensor_type_index": 3, "sensor_reading": 1, "fault_prob_mean": 0.7899,
-       "current_theta": {"alpha": 2.0, "beta": 8.0}},
-      {"sensor_type_index": 5, "sensor_reading": 1, "fault_prob_mean": 0.8054,
-       "current_theta": {"alpha": 4.0, "beta": 6.0}},
-      {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob_mean": 0.3368,
-       "current_theta": {"alpha": 3.0, "beta": 7.0}}
+      {"sensor_type_index": 0, "sensor_reading": 3,
+       "current_theta": {"alpha": 1.0, "beta": 9.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 1, "sensor_reading": 2,
+       "current_theta": {"alpha": 1.0, "beta": 9.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 3, "sensor_reading": 1,
+       "current_theta": {"alpha": 2.0, "beta": 8.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 5, "sensor_reading": 1,
+       "current_theta": {"alpha": 4.0, "beta": 6.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 6, "sensor_reading": 3,
+       "current_theta": {"alpha": 3.0, "beta": 7.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}}
     ]
   }' | python3 -m json.tool
 ```
@@ -221,28 +233,35 @@ curl -s -X POST http://localhost:8000/update-priors \
 ```json
 {
     "updated_thetas": [
-        {"sensor_type_index": 0, "alpha": 1.0,  "beta": 9.3522},
-        {"sensor_type_index": 1, "alpha": 1.0,  "beta": 9.0278},
-        {"sensor_type_index": 3, "alpha": 2.15, "beta": 8.0},
-        {"sensor_type_index": 5, "alpha": 4.15, "beta": 6.0},
-        {"sensor_type_index": 6, "alpha": 3.0,  "beta": 7.3316}
+        {"sensor_type_index": 0, "alpha": 1.0109, "beta": 9.4891},
+        {"sensor_type_index": 1, "alpha": 1.5,    "beta": 9.0},
+        {"sensor_type_index": 3, "alpha": 2.5,    "beta": 8.0},
+        {"sensor_type_index": 5, "alpha": 4.5,    "beta": 6.0},
+        {"sensor_type_index": 6, "alpha": 3.0395, "beta": 7.4605}
+    ],
+    "updated_phis": [
+        {"sensor_type_index": 0, "pseudocounts": [1, 1, 1, 1.0109, 1]},
+        {"sensor_type_index": 1, "pseudocounts": [1, 1, 1.5, 1, 1]},
+        {"sensor_type_index": 3, "pseudocounts": [1, 1.5, 1, 1, 1]},
+        {"sensor_type_index": 5, "pseudocounts": [1, 1.5, 1, 1, 1]},
+        {"sensor_type_index": 6, "pseudocounts": [1, 1, 1, 1.0395, 1]}
     ]
 }
 ```
 
-> **Analysis:**
-> - **Camera (0):** β 9.0→9.3522 — correctly flagged HIGH during a real threat; β grows (reliability improving).
-> - **Mic (1):** β 9.0→9.0278 — flagged the threat (reading ≥ 2) but barely rewarded; MACE had judged it
->   94% faulty this incident so it gets almost no credit. The update formula weights by `(1 − fault_prob)`.
-> - **Door (3) & badge (5):** α incremented by 0.15 each — both reported LOW while a real HIGH threat was present;
->   penalised for missing it.
-> - **Time context (6):** β 7.0→7.3316 — correctly reported HIGH during a real threat; reliability slowly improving.
+> **Analysis (gold = HIGH/3):**
+> - **Camera (0):** read HIGH = gold → responsibility r ≈ 0.02 → β grows to 9.4891 (reliability reinforced);
+>   φ gains a sliver at HIGH.
+> - **Mic (1):** read MEDIUM ≠ gold → r = 1 → α 1.0→1.5 (penalised for disagreeing), and φ gains mass at
+>   **MEDIUM** — the model begins learning the mic *under-reads* when faulty.
+> - **Door (3) & badge (5):** read LOW ≠ gold → r = 1 → α += 0.5 each; φ gains mass at LOW.
+> - **Time context (6):** read HIGH = gold → small r → β grows to 7.4605; reliability slowly improving.
 
 ---
 
 ### Step 4 — Adjacent zone: glass break in the server room
 
-While security responds to the corridor, a second alarm fires in the server room. Glass break sensor: CRITICAL (4). Camera CV: CRITICAL (4). Microphone: HIGH (3). Time context: still HIGH (3). Using the updated priors from Step 3.
+While security responds to the corridor, a second alarm fires in the server room. Glass break sensor: CRITICAL (4). Camera CV: CRITICAL (4). Microphone: HIGH (3). Time context: still HIGH (3). Fed the **accumulated θ and φ priors from Step 3** (sensors 2 and 4, which sat out Step 3, keep their starting priors).
 
 ```bash
 curl -s -X POST http://localhost:8000/infer \
@@ -251,22 +270,22 @@ curl -s -X POST http://localhost:8000/infer \
     "incident_id": "server-room-002",
     "sensor_readings": [4, 3, -1, -1, 4, -1, 3],
     "theta_priors": [
-      {"alpha":1.0,  "beta":9.3522},
-      {"alpha":1.0,  "beta":9.0278},
-      {"alpha":2.0,  "beta":8.0},
-      {"alpha":2.15, "beta":8.0},
-      {"alpha":1.0,  "beta":9.0},
-      {"alpha":4.15, "beta":6.0},
-      {"alpha":3.0,  "beta":7.3316}
+      {"alpha":1.0109, "beta":9.4891},
+      {"alpha":1.5,    "beta":9.0},
+      {"alpha":2.0,    "beta":8.0},
+      {"alpha":2.5,    "beta":8.0},
+      {"alpha":1.0,    "beta":9.0},
+      {"alpha":4.5,    "beta":6.0},
+      {"alpha":3.0395, "beta":7.4605}
     ],
     "phi_priors": [
+      {"pseudocounts":[1,1,1,1.0109,1]},
+      {"pseudocounts":[1,1,1.5,1,1]},
       {"pseudocounts":[1,1,1,1,1]},
+      {"pseudocounts":[1,1.5,1,1,1]},
       {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]}
+      {"pseudocounts":[1,1.5,1,1,1]},
+      {"pseudocounts":[1,1,1,1.0395,1]}
     ]
   }' | python3 -m json.tool
 ```
@@ -275,34 +294,37 @@ curl -s -X POST http://localhost:8000/infer \
 ```json
 {
     "incident_id": "server-room-002",
-    "threat_dist": [0.0004, 0.0004, 0.0004, 0.2171, 0.7819],
+    "threat_dist": [0.0004, 0.0004, 0.0004, 0.1654, 0.8334],
     "threat_level": 4,
-    "confidence": 0.7819,
-    "entropy": 0.5325,
+    "confidence": 0.8334,
+    "entropy": 0.4584,
     "sensor_reliability": [
-        {"sensor_type_index": 0, "sensor_reading": 4, "fault_prob": 0.2345, "reliability": 0.7655},
-        {"sensor_type_index": 1, "sensor_reading": 3, "fault_prob": 0.7876, "reliability": 0.2124},
-        {"sensor_type_index": 4, "sensor_reading": 4, "fault_prob": 0.2351, "reliability": 0.7649},
-        {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob": 0.7993, "reliability": 0.2007}
+        {"sensor_type_index": 0, "sensor_reading": 4, "fault_prob": 0.1839, "reliability": 0.8161},
+        {"sensor_type_index": 1, "sensor_reading": 3, "fault_prob": 0.8394, "reliability": 0.1606},
+        {"sensor_type_index": 4, "sensor_reading": 4, "fault_prob": 0.1847, "reliability": 0.8153},
+        {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob": 0.8474, "reliability": 0.1526}
     ],
     "num_observations": 4,
-    "inference_ms": 523
+    "inference_ms": 582
 }
 ```
 
-> **Analysis:** CRITICAL (4) at 78% confidence, entropy 0.53 — the sharpest, most decisive inference so far.
-> Camera and glass break both reported CRITICAL and agree completely → both ~76% reliable.
-> Microphone (reported HIGH, not CRITICAL) is penalised as 79% faulty — MACE is suspicious of an
+> **Analysis:** CRITICAL (4) at **83% confidence**, entropy 0.46 — the sharpest, most decisive inference so far.
+> Camera and glass break both reported CRITICAL and agree completely → both ~82% reliable.
+> Microphone (reported HIGH, not CRITICAL) is penalised as 84% faulty — MACE is suspicious of an
 > under-reading sensor when two trusted peers agree on a higher level.
-> Time context (reported HIGH, not CRITICAL) similarly discounted at 80% faulty.
-> The updated camera prior from Step 3 (β=9.352 vs the original β=9.0) contributes slightly higher
-> starting trust, which is why camera reaches 76% reliability faster here than in Step 2.
+> Time context (reported HIGH, not CRITICAL) similarly discounted at 85% faulty.
+> Compared with the pre-Fix-B walkthrough (78% confidence), this inference is more decisive: Step 3 now
+> propagates **both** the camera's raised β (9.0→9.4891) **and** the mic's fault-bias φ (mass at MEDIUM),
+> so the trusted CRITICAL sensors carry more weight from the outset.
 
 ---
 
 ### Step 5 — Operator verdict: TRUE_ALARM in server room
 
-Break-in confirmed. Update priors with the Step 4 posteriors.
+Break-in confirmed; the operator resolves the incident to gold level **CRITICAL (4)**.
+Each sensor supplies the θ and φ it carried into this incident (the accumulated state from Step 3;
+the Step 4 inference does not mutate priors).
 
 ```bash
 curl -s -X POST http://localhost:8000/update-priors \
@@ -310,15 +332,16 @@ curl -s -X POST http://localhost:8000/update-priors \
   -d '{
     "verdict": "TRUE_ALARM",
     "learning_rate": 0.5,
+    "true_threat_level": 4,
     "sensors": [
-      {"sensor_type_index": 0, "sensor_reading": 4, "fault_prob_mean": 0.2345,
-       "current_theta": {"alpha": 1.0, "beta": 9.3522}},
-      {"sensor_type_index": 1, "sensor_reading": 3, "fault_prob_mean": 0.7876,
-       "current_theta": {"alpha": 1.0, "beta": 9.0278}},
-      {"sensor_type_index": 4, "sensor_reading": 4, "fault_prob_mean": 0.2351,
-       "current_theta": {"alpha": 1.0, "beta": 9.0}},
-      {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob_mean": 0.7994,
-       "current_theta": {"alpha": 3.0, "beta": 7.3316}}
+      {"sensor_type_index": 0, "sensor_reading": 4,
+       "current_theta": {"alpha": 1.0109, "beta": 9.4891}, "current_phi": {"pseudocounts": [1,1,1,1.0109,1]}},
+      {"sensor_type_index": 1, "sensor_reading": 3,
+       "current_theta": {"alpha": 1.5, "beta": 9.0}, "current_phi": {"pseudocounts": [1,1,1.5,1,1]}},
+      {"sensor_type_index": 4, "sensor_reading": 4,
+       "current_theta": {"alpha": 1.0, "beta": 9.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 6, "sensor_reading": 3,
+       "current_theta": {"alpha": 3.0395, "beta": 7.4605}, "current_phi": {"pseudocounts": [1,1,1,1.0395,1]}}
     ]
   }' | python3 -m json.tool
 ```
@@ -327,28 +350,33 @@ curl -s -X POST http://localhost:8000/update-priors \
 ```json
 {
     "updated_thetas": [
-        {"sensor_type_index": 0, "alpha": 1.0, "beta": 9.73495},
-        {"sensor_type_index": 1, "alpha": 1.0, "beta": 9.134},
-        {"sensor_type_index": 4, "alpha": 1.0, "beta": 9.38245},
-        {"sensor_type_index": 6, "alpha": 3.0, "beta": 7.4319}
+        {"sensor_type_index": 0, "alpha": 1.0213, "beta": 9.9787},
+        {"sensor_type_index": 1, "alpha": 2.0,    "beta": 9.0},
+        {"sensor_type_index": 4, "alpha": 1.0109, "beta": 9.4891},
+        {"sensor_type_index": 6, "alpha": 3.5395, "beta": 7.4605}
+    ],
+    "updated_phis": [
+        {"sensor_type_index": 0, "pseudocounts": [1, 1, 1, 1.0109, 1.0104]},
+        {"sensor_type_index": 1, "pseudocounts": [1, 1, 1.5, 1.5, 1]},
+        {"sensor_type_index": 4, "pseudocounts": [1, 1, 1, 1, 1.0109]},
+        {"sensor_type_index": 6, "pseudocounts": [1, 1, 1, 1.5395, 1]}
     ]
 }
 ```
 
-> **Analysis:**
-> - **Camera (0):** β 9.0→9.3522→9.73495 across two incidents. Consistently reported the correct level;
->   being rapidly validated as reliable. Beta mean fault rate: 10.0% → 9.7% → 9.3%.
-> - **Glass break (4):** β 9.0→9.38245 on first incident — immediately trusted after one correct CRITICAL call.
-> - **Mic (1):** β 9.0→9.0278→9.134 — receiving credit across both incidents but very slowly, because MACE
->   keeps judging it as high-fault when it under-reports relative to consensus.
-> - **Time context (6):** β 7.0→7.3316→7.4319 — steady slow improvement; structural late-night risk signal
->   is being confirmed as genuine.
+> **Analysis (gold = CRITICAL/4):**
+> - **Camera (0):** read CRITICAL = gold → small r → β grows to 9.9787; validated as reliable across two incidents.
+> - **Glass break (4):** read CRITICAL = gold → β grows to 9.4891 — trusted after one correct call; φ nudged at CRITICAL.
+> - **Mic (1):** read HIGH ≠ gold → r = 1 → α 1.5→2.0 (penalised again); its φ now carries mass at **both
+>   MEDIUM (from incident 1) and HIGH (from incident 2)** — the "one level low" under-read is being learned
+>   as a distribution shape, not just a rising fault rate.
+> - **Time context (6):** read HIGH ≠ gold → r = 1 → α 3.0395→3.5395; φ gains mass at HIGH.
 
 ---
 
 ### Step 6 — All-clear sweep: security has cleared the north corridor
 
-Security swept the area. All physical sensors report CLEAR (0). Time context still reports HIGH (it's still 02:30 AM). Using fully accumulated priors from Steps 3 and 5.
+Security swept the area. All physical sensors report CLEAR (0). Time context still reports HIGH (it's still 02:30 AM). Using the **fully accumulated θ and φ priors from Steps 3 and 5**.
 
 ```bash
 curl -s -X POST http://localhost:8000/infer \
@@ -357,22 +385,22 @@ curl -s -X POST http://localhost:8000/infer \
     "incident_id": "north-corridor-003",
     "sensor_readings": [0, 0, -1, 0, -1, -1, 3],
     "theta_priors": [
-      {"alpha":1.0,  "beta":9.73495},
-      {"alpha":1.0,  "beta":9.134},
-      {"alpha":2.0,  "beta":8.0},
-      {"alpha":2.15, "beta":8.0},
-      {"alpha":1.0,  "beta":9.38245},
-      {"alpha":4.15, "beta":6.0},
-      {"alpha":3.0,  "beta":7.4319}
+      {"alpha":1.0213, "beta":9.9787},
+      {"alpha":2.0,    "beta":9.0},
+      {"alpha":2.0,    "beta":8.0},
+      {"alpha":2.5,    "beta":8.0},
+      {"alpha":1.0109, "beta":9.4891},
+      {"alpha":4.5,    "beta":6.0},
+      {"alpha":3.5395, "beta":7.4605}
     ],
     "phi_priors": [
+      {"pseudocounts":[1,1,1,1.0109,1.0104]},
+      {"pseudocounts":[1,1,1.5,1.5,1]},
       {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]},
-      {"pseudocounts":[1,1,1,1,1]}
+      {"pseudocounts":[1,1.5,1,1,1]},
+      {"pseudocounts":[1,1,1,1,1.0109]},
+      {"pseudocounts":[1,1.5,1,1,1]},
+      {"pseudocounts":[1,1,1,1.5395,1]}
     ]
   }' | python3 -m json.tool
 ```
@@ -381,31 +409,31 @@ curl -s -X POST http://localhost:8000/infer \
 ```json
 {
     "incident_id": "north-corridor-003",
-    "threat_dist": [0.99964, 0.000022, 0.000022, 0.000294, 0.000022],
+    "threat_dist": [0.99956, 0.0000383, 0.0000383, 0.000329, 0.0000383],
     "threat_level": 0,
-    "confidence": 0.99964,
-    "entropy": 0.0035,
+    "confidence": 0.99956,
+    "entropy": 0.0043,
     "sensor_reliability": [
-        {"sensor_type_index": 0, "sensor_reading": 0, "fault_prob": 0.0205, "reliability": 0.9795},
-        {"sensor_type_index": 1, "sensor_reading": 0, "fault_prob": 0.0218, "reliability": 0.9782},
-        {"sensor_type_index": 3, "sensor_reading": 0, "fault_prob": 0.0514, "reliability": 0.9486},
+        {"sensor_type_index": 0, "sensor_reading": 0, "fault_prob": 0.0204, "reliability": 0.9796},
+        {"sensor_type_index": 1, "sensor_reading": 0, "fault_prob": 0.0361, "reliability": 0.9639},
+        {"sensor_type_index": 3, "sensor_reading": 0, "fault_prob": 0.0542, "reliability": 0.9458},
         {"sensor_type_index": 6, "sensor_reading": 3, "fault_prob": 0.9997, "reliability": 0.0003}
     ],
     "num_observations": 4,
-    "inference_ms": 521
+    "inference_ms": 572
 }
 ```
 
 > **Analysis — the most striking result of the scenario:**
 >
-> CLEAR (0) at **99.96% confidence**, entropy **0.0035** (essentially zero uncertainty).
+> CLEAR (0) at **99.96% confidence**, entropy **0.0043** (essentially zero uncertainty).
 >
 > The time context sensor, which has been quietly accumulating reliability credit across two TRUE_ALARMs,
 > is now judged **99.97% faulty** — because three now-trusted physical sensors all agree on CLEAR while
 > time context insists HIGH.
 >
 > This is MACE self-consistency at work: the model learned from prior incidents that camera and mic are
-> highly reliable (β≈9.7 and 9.1 → fault rate ~2%), so when all three physical sensors agree on CLEAR,
+> highly reliable (β≈9.98 and 9.0 → fault rate ~2–3%), so when all three physical sensors agree on CLEAR,
 > time context's contradicting HIGH is treated as noise. The all-clear is authoritative.
 
 ---
@@ -417,15 +445,15 @@ curl -s -X POST http://localhost:8000/infer \
 | 1 | north-corridor-001 | badge LOW, time HIGH | HIGH | 52% | 1.10 |
 | 2 | north-corridor-001 | +camera HIGH, mic MEDIUM, door LOW | HIGH | 72% | 0.75 |
 | 3 | — | Operator: TRUE_ALARM | priors updated | — | — |
-| 4 | server-room-002 | camera CRITICAL, glass CRITICAL, mic HIGH, time HIGH | **CRITICAL** | 78% | 0.53 |
+| 4 | server-room-002 | camera CRITICAL, glass CRITICAL, mic HIGH, time HIGH | **CRITICAL** | 83% | 0.46 |
 | 5 | — | Operator: TRUE_ALARM | priors updated | — | — |
 | 6 | north-corridor-003 | camera CLEAR, mic CLEAR, door CLEAR, time HIGH | **CLEAR** | 99.96% | 0.004 |
 
 **Key behavioral observations:**
 
-1. **MACE discounts under-reading sensors.** The microphone repeatedly reported one level below consensus (MEDIUM/HIGH vs HIGH/CRITICAL). Across both incidents it was judged highly faulty, received minimal prior credit, and will continue being questioned until it agrees with peers more consistently.
+1. **MACE learns the *shape* of a sensor's error, not just its rate.** The microphone repeatedly reported one level below consensus (MEDIUM vs HIGH, then HIGH vs CRITICAL). Each disagreement with the gold level both raises its fault rate θ (α 1.0→1.5→2.0) **and** deposits mass in its bias distribution φ — which now peaks at MEDIUM and HIGH, encoding the systematic under-read. This φ learning is new under Fix B; the old θ-only heuristic could only record "often wrong," never "wrong by one level low."
 
-2. **Prior accumulation compounds reliability.** The camera's β grew from 9.0 to 9.7345 across two correct calls. By Step 6 it is 98% reliable and its CLEAR reading essentially overrides time context alone.
+2. **Prior accumulation compounds reliability.** The camera's β grew from 9.0 to 9.9787 across two correct calls. By Step 6 it is ~98% reliable and its CLEAR reading essentially overrides time context alone.
 
 3. **Time context is correctly neutralised on all-clear.** It contributed genuine signal during active incidents (late night = suspicious) but is immediately and correctly overridden (99.97% faulty) the moment trusted physical sensors report CLEAR. Ambient contextual risk cannot block an all-clear from authoritative sensors.
 
@@ -559,15 +587,16 @@ curl -s -X POST http://localhost:8000/update-priors \
   -d '{
     "verdict": "TRUE_ALARM",
     "learning_rate": 0.5,
+    "true_threat_level": 3,
     "sensors": [
-      {"sensor_type_index": 0, "sensor_reading": 3, "fault_prob_mean": 0.035,
-       "current_theta": {"alpha": 1.0, "beta": 9.0}},
-      {"sensor_type_index": 1, "sensor_reading": 3, "fault_prob_mean": 0.035,
-       "current_theta": {"alpha": 1.0, "beta": 9.0}},
-      {"sensor_type_index": 4, "sensor_reading": 2, "fault_prob_mean": 0.991,
-       "current_theta": {"alpha": 2.0, "beta": 8.0}},
-      {"sensor_type_index": 6, "sensor_reading": 0, "fault_prob_mean": 0.998,
-       "current_theta": {"alpha": 5.0, "beta": 5.0}}
+      {"sensor_type_index": 0, "sensor_reading": 3,
+       "current_theta": {"alpha": 1.0, "beta": 9.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 1, "sensor_reading": 3,
+       "current_theta": {"alpha": 1.0, "beta": 9.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 4, "sensor_reading": 2,
+       "current_theta": {"alpha": 2.0, "beta": 8.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}},
+      {"sensor_type_index": 6, "sensor_reading": 0,
+       "current_theta": {"alpha": 5.0, "beta": 5.0}, "current_phi": {"pseudocounts": [1,1,1,1,1]}}
     ]
   }' | python3 -m json.tool
 ```
@@ -576,16 +605,23 @@ curl -s -X POST http://localhost:8000/update-priors \
 ```json
 {
     "updated_thetas": [
-        {"sensor_type_index": 0, "alpha": 1.0,   "beta": 9.4825},
-        {"sensor_type_index": 1, "alpha": 1.0,   "beta": 9.4825},
-        {"sensor_type_index": 4, "alpha": 2.0,   "beta": 8.0045},
-        {"sensor_type_index": 6, "alpha": 5.15,  "beta": 5.0}
+        {"sensor_type_index": 0, "alpha": 1.0109, "beta": 9.4891},
+        {"sensor_type_index": 1, "alpha": 1.0109, "beta": 9.4891},
+        {"sensor_type_index": 4, "alpha": 2.5,    "beta": 8.0},
+        {"sensor_type_index": 6, "alpha": 5.5,    "beta": 5.0}
+    ],
+    "updated_phis": [
+        {"sensor_type_index": 0, "pseudocounts": [1, 1, 1, 1.0109, 1]},
+        {"sensor_type_index": 1, "pseudocounts": [1, 1, 1, 1.0109, 1]},
+        {"sensor_type_index": 4, "pseudocounts": [1, 1, 1.5, 1, 1]},
+        {"sensor_type_index": 6, "pseudocounts": [1.5, 1, 1, 1, 1]}
     ]
 }
 ```
 
-> Camera and mic both correctly flagged HIGH → β increases (Beta mean shifts toward 0, more reliable).
-> Time context reported CLEAR during a real threat → α increases (Beta mean shifts higher, less reliable).
+> Gold = HIGH (3). Camera and mic read HIGH = gold → small responsibility → β increases (Beta mean shifts
+> toward 0, more reliable). Glass break read MEDIUM and time context read CLEAR — both disagree with gold →
+> responsibility 1 → α increases (less reliable), and each sensor's φ gains mass at the level it wrongly emitted.
 
 ---
 

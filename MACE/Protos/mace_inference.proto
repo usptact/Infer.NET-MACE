@@ -13,8 +13,9 @@ service MaceInference {
   // Priors and sensor readings arrive per-request; pod is fully stateless.
   rpc Infer (InferRequest) returns (InferResponse);
 
-  // Cold path: compute updated Beta priors after an operator verdict.
-  // Pure arithmetic — does not use Infer.NET.
+  // Cold path: compute updated θ (Beta) and φ (Dirichlet) priors after an
+  // operator verdict. Pure arithmetic — does not use Infer.NET. Implements the
+  // single-incident EM step of the MACE model (see PriorUpdateService).
   rpc UpdatePriors (UpdatePriorsRequest) returns (UpdatePriorsResponse);
 
   // Kubernetes liveness / readiness probe.
@@ -86,14 +87,23 @@ message InferResponse {
 message SensorPriorUpdate {
   int32     sensor_type_index  = 1;
   int32     sensor_reading     = 2;   // -1 if absent
-  double    fault_prob_mean    = 3;   // S[0][j].GetMean() from a previous Infer call
-  BetaParams current_theta     = 4;
+  // DEPRECATED: no longer used by the EM update, which recomputes the fault
+  // responsibility from the gold true level. Retained for wire compatibility
+  // and diagnostic logging.
+  double    fault_prob_mean    = 3;
+  BetaParams      current_theta = 4;   // current θ (Beta) prior for this sensor type
+  DirichletParams current_phi   = 5;   // current φ (Dirichlet) prior for this sensor type
 }
 
 message UpdatePriorsRequest {
   string verdict      = 1;   // "TRUE_ALARM" or "FALSE_ALARM"
   double learning_rate = 2;
   repeated SensorPriorUpdate sensors = 3;
+  // Operator-resolved gold threat level for the closed incident, used to
+  // recompute each sensor's fault responsibility. Interpreted only when
+  // verdict == "TRUE_ALARM"; a "FALSE_ALARM" verdict pins the gold level to
+  // CLEAR (0) regardless of this field. Range: [0, NumThreatLevels).
+  int32  true_threat_level = 4;
 }
 
 message UpdatedTheta {
@@ -102,8 +112,14 @@ message UpdatedTheta {
   double beta              = 3;
 }
 
+message UpdatedPhi {
+  int32  sensor_type_index    = 1;
+  repeated double pseudocounts = 2;   // length == NumThreatLevels
+}
+
 message UpdatePriorsResponse {
   repeated UpdatedTheta updated_thetas = 1;
+  repeated UpdatedPhi   updated_phis   = 2;
 }
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,18 @@ make curl-infer     # POST /infer  (camera=HIGH + mic=HIGH + badge=MEDIUM + time
 make curl-update    # POST /update-priors  (TRUE_ALARM, reinforce camera + mic)
 ```
 
+## Automated tests
+
+`test_gateway.py` drives the gateway end-to-end (HTTP → gRPC): the EM θ/φ update,
+`FALSE_ALARM` gold-pinning, absent-sensor echo, deprecated-field back-compat, and
+validation (422/400). It requires a running stack and **skips itself** if the
+gateway is unreachable.
+
+```bash
+docker compose up -d           # from the repo root
+make test                      # or: MACE_GATEWAY_URL=http://host:port pytest -v test_gateway.py
+```
+
 ## Direct curl examples
 
 ### POST /infer
@@ -62,11 +74,14 @@ curl -X POST http://localhost:8000/update-priors \
   -d '{
     "verdict": "TRUE_ALARM",
     "learning_rate": 0.5,
+    "true_threat_level": 3,
     "sensors": [
-      {"sensor_type_index":0, "annotation":3, "spammer_prob_mean":0.09,
-       "current_theta":{"alpha":1,"beta":9}},
-      {"sensor_type_index":1, "annotation":3, "spammer_prob_mean":0.12,
-       "current_theta":{"alpha":1,"beta":9}}
+      {"sensor_type_index":0, "sensor_reading":3,
+       "current_theta":{"alpha":1,"beta":9},
+       "current_phi":{"pseudocounts":[1,1,1,1,1]}},
+      {"sensor_type_index":1, "sensor_reading":3,
+       "current_theta":{"alpha":1,"beta":9},
+       "current_phi":{"pseudocounts":[1,1,1,1,1]}}
     ]
   }'
 ```

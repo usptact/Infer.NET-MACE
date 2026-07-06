@@ -187,38 +187,49 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
         }
 
+        // ── Resolve the gold true level and validate per-sensor payload ────────
+        // A FALSE_ALARM pins the gold level to CLEAR (0); a TRUE_ALARM uses the
+        // operator-resolved level supplied on the request.
+        int goldLevel = verdict == Verdict.FalseAlarm ? 0 : request.TrueThreatLevel;
+        ValidateUpdatePriorsRequest(request, goldLevel);
+
         double lr = request.LearningRate > 0 ? request.LearningRate : 0.5;
 
         // ── DEBUG: log incoming request before computing ───────────────────────
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("UpdatePriors request:\n{Detail}",
-                FormatUpdatePriorsRequest(request, lr));
+                FormatUpdatePriorsRequest(request, lr, goldLevel));
 
-        // ── Compute updated priors ─────────────────────────────────────────────
+        // ── Compute updated priors (single-incident EM step) ───────────────────
         var response = new UpdatePriorsResponse();
         foreach (var sensor in request.Sensors)
         {
-            var current = new BetaParameters(sensor.CurrentTheta.Alpha, sensor.CurrentTheta.Beta);
-            var updated = _priorUpdate.UpdateTheta(
-                current, sensor.FaultProbMean, sensor.SensorReading, verdict, lr);
+            var currentTheta = new BetaParameters(sensor.CurrentTheta.Alpha, sensor.CurrentTheta.Beta);
+            var currentPhi   = sensor.CurrentPhi.Pseudocounts.ToArray();
+            var updated = _priorUpdate.UpdateBeliefs(
+                currentTheta, currentPhi, sensor.SensorReading, goldLevel, lr);
 
             response.UpdatedThetas.Add(new UpdatedTheta
             {
                 SensorTypeIndex = sensor.SensorTypeIndex,
-                Alpha           = updated.Alpha,
-                Beta            = updated.Beta
+                Alpha           = updated.Theta.Alpha,
+                Beta            = updated.Theta.Beta
             });
+
+            var updatedPhi = new UpdatedPhi { SensorTypeIndex = sensor.SensorTypeIndex };
+            updatedPhi.Pseudocounts.AddRange(updated.Phi);
+            response.UpdatedPhis.Add(updatedPhi);
         }
 
         // ── INFO: one compact line ─────────────────────────────────────────────
         _logger.LogInformation(
-            "UpdatePriors  verdict={Verdict}  sensors={Count}  lr={Lr:F2}",
-            request.Verdict, request.Sensors.Count, lr);
+            "UpdatePriors  verdict={Verdict}  gold={Gold}  sensors={Count}  lr={Lr:F2}",
+            request.Verdict, LevelName(goldLevel), request.Sensors.Count, lr);
 
         // ── DEBUG: before/after for every sensor ──────────────────────────────
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("UpdatePriors result:\n{Detail}",
-                FormatUpdatePriorsResult(request, response, lr));
+                FormatUpdatePriorsResult(request, response, lr, goldLevel));
 
         UpdatePriorsRequests.WithLabels(request.Verdict.ToLowerInvariant()).Inc();
         return Task.FromResult(response);
@@ -287,6 +298,36 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         if (req.WarmStart.Count > 0 && req.WarmStart.Count != _opts.NumThreatLevels)
             throw new RpcException(new Status(StatusCode.InvalidArgument,
                 $"warm_start must be empty or have {_opts.NumThreatLevels} elements, got {req.WarmStart.Count}."));
+    }
+
+    private void ValidateUpdatePriorsRequest(UpdatePriorsRequest req, int goldLevel)
+    {
+        if (goldLevel < 0 || goldLevel >= _opts.NumThreatLevels)
+            throw new RpcException(new Status(StatusCode.InvalidArgument,
+                $"true_threat_level must be in [0, {_opts.NumThreatLevels}), got {goldLevel}."));
+
+        foreach (var sensor in req.Sensors)
+        {
+            if (sensor.SensorReading < -1 || sensor.SensorReading >= _opts.NumThreatLevels)
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    $"sensor_reading must be -1 or in [0, {_opts.NumThreatLevels}), " +
+                    $"got {sensor.SensorReading} for sensor {sensor.SensorTypeIndex}."));
+
+            if (sensor.CurrentTheta is null || sensor.CurrentTheta.Alpha <= 0 || sensor.CurrentTheta.Beta <= 0)
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    $"current_theta must have positive alpha and beta for sensor {sensor.SensorTypeIndex}."));
+
+            // φ is required by the EM update: an absent sensor still needs a
+            // well-formed prior so the returned pseudocounts round-trip unchanged.
+            if (sensor.CurrentPhi is null || sensor.CurrentPhi.Pseudocounts.Count != _opts.NumThreatLevels)
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    $"current_phi must have {_opts.NumThreatLevels} pseudocounts for sensor {sensor.SensorTypeIndex}, " +
+                    $"got {sensor.CurrentPhi?.Pseudocounts.Count ?? 0}."));
+
+            if (sensor.CurrentPhi.Pseudocounts.Any(c => c <= 0))
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    $"current_phi pseudocounts must all be positive for sensor {sensor.SensorTypeIndex}."));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -411,24 +452,26 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
         return sb.ToString();
     }
 
-    private static string FormatUpdatePriorsRequest(UpdatePriorsRequest req, double lr)
+    private static string FormatUpdatePriorsRequest(UpdatePriorsRequest req, double lr, int goldLevel)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"  verdict       : {req.Verdict}");
-        sb.AppendLine($"  learning_rate : {lr:F2}");
-        sb.Append($"  sensors       : {req.Sensors.Count}");
+        sb.AppendLine($"  verdict          : {req.Verdict}");
+        sb.AppendLine($"  gold_true_level  : {goldLevel}");
+        sb.AppendLine($"  learning_rate    : {lr:F2}");
+        sb.Append($"  sensors          : {req.Sensors.Count}");
         return sb.ToString();
     }
 
-    private static string FormatUpdatePriorsResult(
-        UpdatePriorsRequest req, UpdatePriorsResponse resp, double lr)
+    private string FormatUpdatePriorsResult(
+        UpdatePriorsRequest req, UpdatePriorsResponse resp, double lr, int goldLevel)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"  verdict={req.Verdict}  lr={lr:F2}");
+        sb.AppendLine($"  verdict={req.Verdict}  gold={goldLevel}  lr={lr:F2}");
 
         foreach (var upd in resp.UpdatedThetas)
         {
             var src = req.Sensors.FirstOrDefault(s => s.SensorTypeIndex == upd.SensorTypeIndex);
+            var phi = resp.UpdatedPhis.FirstOrDefault(p => p.SensorTypeIndex == upd.SensorTypeIndex);
 
             string status;
             if (src is null)
@@ -439,13 +482,13 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
             {
                 status = "absent — no change";
             }
-            else if (src.SensorReading >= 2)
+            else if (src.SensorReading == goldLevel)
             {
-                status = req.Verdict == "TRUE_ALARM" ? "flagged correctly, reinforced" : "false alarm contributor";
+                status = "matched gold, mostly reliable";
             }
             else
             {
-                status = req.Verdict == "TRUE_ALARM" ? "missed threat, penalised" : "correctly quiet, reinforced";
+                status = "disagreed with gold, penalised";
             }
 
             double origAlpha = src?.CurrentTheta.Alpha ?? upd.Alpha;
@@ -456,7 +499,11 @@ public sealed class MaceInferenceGrpcService : MaceInference.MaceInferenceBase
                 ? $"α {origAlpha:F3}→{upd.Alpha:F3}  β {origBeta:F3}→{upd.Beta:F3}"
                 : $"α {upd.Alpha:F3}  β {upd.Beta:F3}  (unchanged)";
 
-            sb.AppendLine($"  sensor[{upd.SensorTypeIndex}]  {delta}   {status}");
+            string phiStr = phi is not null
+                ? $"  φ=[{string.Join(",", phi.Pseudocounts.Select(c => c.ToString("F3")))}]"
+                : string.Empty;
+
+            sb.AppendLine($"  sensor[{upd.SensorTypeIndex}]  {delta}{phiStr}   {status}");
         }
 
         // Trim trailing newline
