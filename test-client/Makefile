@@ -3,13 +3,19 @@ UVICORN ?= uvicorn
 PORT    ?= 8000
 TARGET  ?= localhost:8080
 
-.PHONY: install generate run curl-health curl-infer curl-update
+.PHONY: install generate run test curl-health curl-infer curl-update
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
 
 generate:
 	bash generate_stubs.sh
+
+# ── Automated gateway tests (requires a running MACE pod + this gateway) ────
+# Override the target gateway with MACE_GATEWAY_URL; the suite skips itself if
+# the gateway is unreachable.
+test:
+	MACE_GATEWAY_URL=http://localhost:$(PORT) $(PYTHON) -m pytest -v test_gateway.py
 
 run: generate
 	MACE_GRPC_TARGET=$(TARGET) $(UVICORN) main:app --reload --port $(PORT)

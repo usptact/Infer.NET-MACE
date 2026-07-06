@@ -32,6 +32,18 @@ make curl-infer     # POST /infer  (camera=HIGH + mic=HIGH + badge=MEDIUM + time
 make curl-update    # POST /update-priors  (TRUE_ALARM, reinforce camera + mic)
 ```
 
+## Automated tests
+
+`test_gateway.py` drives the gateway end-to-end (HTTP → gRPC): the EM θ/φ update,
+`FALSE_ALARM` gold-pinning, absent-sensor echo, deprecated-field back-compat, and
+validation (422/400). It requires a running stack and **skips itself** if the
+gateway is unreachable.
+
+```bash
+docker compose up -d           # from the repo root
+make test                      # or: MACE_GATEWAY_URL=http://host:port pytest -v test_gateway.py
+```
+
 ## Direct curl examples
 
 ### POST /infer
