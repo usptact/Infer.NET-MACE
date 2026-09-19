@@ -448,3 +448,9 @@ $RECYCLE.BIN/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+# Infer.NET compiled model source, emitted into the working directory at run time
+GeneratedSource/
+
+# MACE run output, written next to the input file
+*_item_labels.csv
+*_worker_spammer_probs.csv

@@ -24,9 +24,11 @@ namespace MACE
                 {
                     Console.WriteLine("Usage: MACE.exe <CSV_FILE> [--iterations N] [--seed N]");
                     Console.WriteLine();
-                    Console.WriteLine("  --iterations N   Number of VMP inference iterations (default: 50).");
+                    Console.WriteLine("  --iterations N   Number of EP inference iterations (default: 50).");
                     Console.WriteLine("                   Increase if results seem unstable across runs.");
-                    Console.WriteLine("  --seed N         RNG seed for reproducible results (default: unseeded).");
+                    Console.WriteLine("  --seed N         RNG seed for label initialisation. Runs are already");
+                    Console.WriteLine("                   reproducible without it; vary it to explore different");
+                    Console.WriteLine("                   fixed points on data with more than one mode.");
                     Console.WriteLine();
                     Console.WriteLine("Example: MACE.exe sample_data.txt --iterations 100 --seed 42");
                     Console.WriteLine();

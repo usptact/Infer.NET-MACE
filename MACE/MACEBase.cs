@@ -1,6 +1,7 @@
 ﻿using Microsoft.ML.Probabilistic.Distributions;
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Math;
+using Microsoft.ML.Probabilistic.Algorithms;
 
 namespace MACE
 {
@@ -47,7 +48,7 @@ namespace MACE
             _itemRange = new Microsoft.ML.Probabilistic.Models.Range(_numItems).Named("item");
             _workerRange = new Microsoft.ML.Probabilistic.Models.Range(_numWorkers).Named("worker");
 
-            _trueLabels = Variable.Array<int>(_itemRange);
+            _trueLabels = Variable.Array<int>(_itemRange).Named("T");
 
             _thetaPriors = Variable.Array<Beta>(_workerRange).Named("thetaPrior");
             _phiPriors = Variable.Array<Dirichlet>(_workerRange).Named("phiPrior");
@@ -69,10 +70,19 @@ namespace MACE
                 _phi[_workerRange] = Variable.Random<Vector, Dirichlet>(_phiPriors[_workerRange]);
             }
 
-            // Initialize inference engine if not already done
+            // Initialize inference engine if not already done.
+            //
+            // Expectation Propagation is chosen deliberately, not inherited as a default.
+            // This model cannot run under Variational Message Passing: the non-spammer branch
+            // copies the true label deterministically (A = T), so under VMP each annotator
+            // sends a point mass at its own observed label, and the product of those messages
+            // over any two annotators who disagree is zero -- inference aborts with
+            // "The model has zero probability" in ReplicateOp.DefAverageLogarithm.
+            // Supporting VMP would require replacing the deterministic copy with a soft
+            // confusion-matrix formulation, which is a change to the model, not the engine.
             if (InferenceEngine == null)
             {
-                InferenceEngine = new InferenceEngine();
+                InferenceEngine = new InferenceEngine(new ExpectationPropagation());
             }
         }
 

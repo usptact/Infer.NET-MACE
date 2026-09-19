@@ -82,7 +82,7 @@ For each item i:
 
 ### Inference
 
-The model uses variational message passing (VMP) for approximate Bayesian inference, which is efficient and scales well to large datasets.
+The model uses expectation propagation (EP) for approximate Bayesian inference. EP is required here rather than chosen for convenience: the non-spammer branch copies the true label deterministically, which makes the model incompatible with variational message passing (see `MACEBase.CreateModel`).
 
 ## Features
 
@@ -135,8 +135,8 @@ MACE.exe <CSV_FILE> [--iterations N] [--seed N]
 
 **Parameters:**
 - `<CSV_FILE>`: Path to the CSV file containing annotation data
-- `--iterations N`: Number of VMP inference iterations (default: 50). Increase if results seem unstable across runs.
-- `--seed N`: RNG seed for reproducible results (default: unseeded). Use when you need identical output across runs.
+- `--iterations N`: Number of EP inference iterations (default: 50). Increase if results seem unstable across runs.
+- `--seed N`: RNG seed for label initialisation. Runs are already reproducible without it, because Infer.NET seeds its RNG deterministically; vary this to explore a different fixed point on data that has more than one mode.
 
 **Output Files:**
 - `<input_name>_item_labels.csv`: Inferred label probabilities for each item
@@ -403,7 +403,7 @@ var trainer = new MACETrain(
     reader.GetNumItems(),
     reader.GetNumCategories(),
     iterations: 50,
-    seed: 42        // omit for unseeded (non-reproducible) runs
+    seed: 42        // omit to use Infer.NET's fixed default seed
 );
 
 var posterior = trainer.InferModelData(data, priors);

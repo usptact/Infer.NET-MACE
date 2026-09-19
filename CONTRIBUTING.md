@@ -38,7 +38,7 @@ This project follows modern C# conventions:
 The core model lives in `MACEBase` and `MACETrain`. If you modify it:
 
 - Verify that inference still converges on `sample_data.txt` and produces qualitatively correct results (Worker 7 identified as spammer, uncertain items flagged)
-- Be aware that VMP is sensitive to initialisation — label initialisation randomises the starting point to break symmetry, so run a few times to confirm stability
+- Be aware that EP is sensitive to initialisation on multimodal data — label initialisation randomises the starting point to break symmetry, so run a few times (or vary `--seed`) to confirm stability
 - If you change the number of inference iterations needed for convergence, update the default in `Program.cs` and the README
 
 ### Input Validation
@@ -76,7 +76,7 @@ Please include:
 ```
 MACE/
   MACEBase.cs       # Abstract probabilistic model (priors, latent variables)
-  MACETrain.cs      # Observation model and VMP inference
+  MACETrain.cs      # Observation model and EP inference
   ModelData.cs      # Container for prior/posterior distributions
   CsvReader.cs      # CSV parsing and input validation
   Program.cs        # CLI entry point and output formatting

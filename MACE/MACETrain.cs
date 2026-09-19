@@ -1,4 +1,4 @@
-using Microsoft.ML.Probabilistic.Distributions;
+﻿using Microsoft.ML.Probabilistic.Distributions;
 using Microsoft.ML.Probabilistic.Math;
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Models.Attributes;
@@ -36,8 +36,10 @@ namespace MACE
         /// <param name="numWorkers">Number of workers in the dataset.</param>
         /// <param name="numItems">Number of items to be annotated.</param>
         /// <param name="numCategories">Number of possible label categories.</param>
-        /// <param name="iterations">Number of VMP inference iterations (default: 50).</param>
-        /// <param name="seed">Optional RNG seed for reproducible label initialisation. When null, results may vary across runs.</param>
+        /// <param name="iterations">Number of EP inference iterations (default: 50).</param>
+        /// <param name="seed">Optional RNG seed for label initialisation. Leaving this null does not make
+        /// results vary: Infer.NET's <see cref="Rand"/> starts from a fixed default seed, so a fresh process
+        /// is already reproducible. Pass a seed to explore a different fixed point on data with several modes.</param>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when any parameter is non-positive.</exception>
         public MACETrain(int numWorkers, int numItems, int numCategories, int iterations = 50, int? seed = null)
         {
@@ -102,7 +104,7 @@ namespace MACE
         }
 
         /// <summary>
-        /// Runs VMP inference and returns posterior distributions for all model parameters.
+        /// Runs EP inference and returns posterior distributions for all model parameters.
         /// The returned <see cref="ModelPosterior"/> can be passed directly as priors to a
         /// subsequent call to support incremental/online learning.
         /// SDist[item][k] is parallel to annotations.WorkerIndices[item][k].
