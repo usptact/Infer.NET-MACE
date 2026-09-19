@@ -1,0 +1,17 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: threatsense-tls
+  namespace: threatsense
+spec:
+  secretName: threatsense-tls
+  duration: 8760h      # 1 year
+  renewBefore: 720h    # renew 30 days before expiry
+  dnsNames:
+  - "192.168.10.201"
+  ipAddresses:
+  - "192.168.10.201"
+  issuerRef:
+    name: threatsense-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

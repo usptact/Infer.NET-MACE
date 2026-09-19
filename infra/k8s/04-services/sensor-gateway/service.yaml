@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sensor-gateway
+  namespace: threatsense
+spec:
+  type: ClusterIP
+  selector:
+    app: sensor-gateway
+  ports:
+  - name: grpc
+    port: 8080
+    targetPort: 8080
+  - name: http
+    port: 8081
+    targetPort: 8081
+  - name: metrics
+    port: 9090
+    targetPort: 9090

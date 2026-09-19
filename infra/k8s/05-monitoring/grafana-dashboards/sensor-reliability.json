@@ -1,0 +1,46 @@
+{
+  "__inputs": [],
+  "__requires": [{ "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" }],
+  "title": "ThreatSense – Sensor Reliability",
+  "uid": "threatsense-reliability",
+  "tags": ["threatsense", "sensors"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Sensor Reliability (1 − spammer_prob mean)",
+      "description": "Queried from the sensor_beliefs table in Postgres. Refresh interval should match how often the Feedback Processor writes.",
+      "type": "bargauge",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "targets": [{
+        "rawSql": "SELECT sensor_id, theta_beta / (theta_alpha + theta_beta) AS reliability FROM sensor_beliefs ORDER BY sensor_id",
+        "format": "table",
+        "legendFormat": "{{sensor_id}}"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 1, "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 0.6 },
+              { "color": "green",  "value": 0.8 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Incidents Seen per Sensor",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
+      "targets": [{
+        "rawSql": "SELECT sensor_id, incidents_seen FROM sensor_beliefs ORDER BY sensor_id",
+        "format": "table",
+        "legendFormat": "{{sensor_id}}"
+      }]
+    }
+  ]
+}

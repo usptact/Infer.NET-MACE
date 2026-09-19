@@ -62,8 +62,18 @@ app.MapGrpcService<MaceInferenceService>();
 app.MapMetrics();
 
 app.MapGet("/", () => Results.Text(
-    "MACE inference service. gRPC on this port; Prometheus metrics at /metrics.",
+    "MACE inference service. gRPC on :8080; metrics at /metrics, health at /healthz and /readyz.",
     "text/plain"));
+
+// Health endpoints live on the HTTP/1.1 port. A kubelet probe speaks HTTP/1.1, so pointing one at
+// the gRPC port would fail regardless of how healthy the process is.
+app.MapGet("/healthz", () => Results.Text("ok", "text/plain"));
+
+// Readiness is about the pool: until its models are warmed, a request would pay for compiling one.
+// The pool is built during startup, so reaching this handler at all means warm-up finished.
+app.MapGet("/readyz", (IInferencePool pool) => pool.Available > 0 || pool.Total > 0
+    ? Results.Json(new { status = "ready", available = pool.Available, total = pool.Total })
+    : Results.Json(new { status = "warming" }, statusCode: StatusCodes.Status503ServiceUnavailable));
 
 // Persist what the service learned, so a restart does not discard every worker's history.
 app.Lifetime.ApplicationStopping.Register(() =>

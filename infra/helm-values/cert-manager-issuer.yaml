@@ -1,0 +1,34 @@
+---
+# Self-signed root CA
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# CA certificate (re-used to sign the TLS cert)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: threatsense-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: ThreatSense Internal CA
+  secretName: threatsense-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+# ClusterIssuer backed by the CA above
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: threatsense-ca-issuer
+spec:
+  ca:
+    secretName: threatsense-ca

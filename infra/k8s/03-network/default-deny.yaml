@@ -1,0 +1,11 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: threatsense
+spec:
+  podSelector: {}   # applies to all pods in namespace
+  policyTypes:
+  - Ingress
+  # No ingress rules = deny all intra-namespace ingress by default.
+  # Explicit allows are in allow-matrix.yaml.

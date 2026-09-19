@@ -1,0 +1,9 @@
+nfs:
+  server: 192.168.10.50   # NAS IP — update if different
+  path: /exports
+
+storageClass:
+  name: nfs
+  defaultClass: true
+  reclaimPolicy: Retain   # keep NFS data if PVC is deleted
+  archiveOnDelete: false

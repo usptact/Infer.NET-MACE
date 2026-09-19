@@ -14,8 +14,11 @@ dotnet build
 # Run the test suite
 dotnet test
 
-# Run the gRPC inference service (gRPC on :5199, metrics on :5200)
+# Run the gRPC inference service (gRPC on :8080; metrics, /healthz, /readyz on :9090)
 dotnet run --project MACE.Service
+
+# Or the whole local stack: service + REST test gateway + Prometheus + Grafana
+docker compose up --build
 
 # Run on a CSV annotation file
 dotnet run --project MACE -- MACE/sample_data.txt
@@ -62,6 +65,16 @@ worker's reliability, and letting it try would let one annotation rewrite a work
   those three, plus `BeliefStore` holding the current parameters. Serilog for logs, Prometheus at
   `/metrics`.
 
+### Deployment and ported material
+
+`docker-compose.yml` runs the service, the Python REST gateway in `test-client/`, Prometheus and
+Grafana. `infra/` and the design docs (`THREATSENSE_DESIGN.md`, `MACE_SERVICE_DESIGN.md`,
+`SCENARIO.md`, `PRESENTATION.md`, `INFRASTRUCTURE.md`, `ISSUES.md`) came from the `online-mace`
+branch and describe the ThreatSense product this model was deployed in. Each doc opens with a banner
+saying what is still true. The `mace-inference` manifests, the Dockerfile, the dashboards and the
+test gateway were rewritten against the current service; the manifests for the other ThreatSense
+services are kept as reference and build from source that is not in this repository.
+
 ### Probabilistic model
 
 - **`MACEBase`** — Abstract base. Declares the shared Infer.NET `Variable` objects: `_theta` (per-worker spammer probability, Beta prior), `_phi` (per-worker label preference when spamming, Dirichlet prior), `_trueLabels` (true label per item), and the item/worker `Range`s. `CreateModel()` wires the priors and creates the engine; `SetModelData(ModelPriors)` binds observed prior values; `InitializeLabels()` assigns random point-mass labels to break symmetry on multimodal data.
@@ -82,10 +95,16 @@ worker's reliability, and letting it try would let one annotation rewrite a work
   missingness as a gate over a sentinel (`Variable.If(reading > -1)`) instead makes the data part of
   the model's structure, which recompiles per call — that shape measured ~500ms per call on a smaller
   problem. `RepeatedCallsDoNotRecompileTheModel` guards this.
+- **The service is single-replica by design.** Worker reliability lives in the process and is
+  written to `Mace__BeliefStorePath` at shutdown. Two replicas would learn from whichever feedback
+  each received, diverge, and overwrite each other's file on exit. Scaling means raising
+  `Mace__PoolSize`, or moving the belief store behind shared storage — a code change, not a manifest
+  change.
 - **DI singletons are lazy.** `MACE.Service` resolves the pool and belief store immediately after
   `builder.Build()`; without that the first request pays the compilation the pool exists to avoid.
 - **The service needs two ports.** gRPC over plaintext requires HTTP/2, which Prometheus scraping and
-  a browser cannot speak, so Kestrel exposes gRPC on 5199 and observability on 5200.
+  a kubelet probe cannot speak, so Kestrel exposes gRPC on 8080 and observability on 9090.
+  The k8s probes in `infra/k8s/04-services/mace-inference` target the metrics port for that reason.
 - **`SDist` is indexed by annotation slot, not worker.** `SDist[item][k]` is parallel to `annotations.WorkerIndices[item][k]`; the actual worker index is `WorkerIndices[item][k]`. `WriteSpammerProbabilitiesToCsv` needs the annotations alongside the posterior for exactly this reason.
 - **`GetNumCategories()` returns the category *count*** (`max(label) + 1`), not the max label value. `Program.cs` passes it to the model constructor unchanged — do not add 1.
 - **Two validation passes with different severity.** `CheckWorkerCoverage()` only *warns* (messages surface via `GetValidationMessages()`) when an item has fewer than 3 annotators; inference still runs. `ValidateLabelRange()` *throws* when the observed labels have a gap (e.g. `{0, 2}`), because a phantom category would silently skew inference.

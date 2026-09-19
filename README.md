@@ -375,7 +375,7 @@ Batch mode scores a whole annotation file at once. When items arrive one at a ti
 judged as results come back, `MACE.Service` serves the same model over gRPC:
 
 ```bash
-dotnet run --project MACE.Service    # gRPC on :5199, Prometheus metrics on :5200
+dotnet run --project MACE.Service    # gRPC on :8080; metrics and health on :9090
 ```
 
 Three calls:
@@ -397,6 +397,31 @@ worker whose behaviour changes can never be re-learned. `Mace:Retention` control
 old evidence decays and the accumulated counts settle at `LearningRate / (1 - Retention)`. The
 default of 0.99 means a worker's reliability reflects roughly their last 50 judged items. Set it to
 1.0 to accumulate without limit.
+
+### Running the whole stack
+
+`docker-compose.yml` brings up the service together with a REST gateway, Prometheus and Grafana:
+
+```bash
+docker compose up --build
+```
+
+| | |
+| --- | --- |
+| REST gateway + Swagger UI | http://localhost:8000/docs |
+| Grafana (admin / admin) | http://localhost:3000 |
+| Prometheus | http://localhost:9091 |
+| gRPC | localhost:8080 |
+| Metrics, `/healthz`, `/readyz` | http://localhost:9090 |
+
+The gateway in `test-client/` bridges HTTP to gRPC, so the service can be exercised with curl. gRPC
+over plaintext requires HTTP/2, which probes and scrapers cannot speak, which is why metrics and
+health live on their own port.
+
+Kubernetes manifests are in `infra/`. The deployment runs a **single replica** on purpose: worker
+reliability lives in the process and is persisted at shutdown, so a second replica would learn
+separately, diverge, and overwrite the first one's state. Serve more load by raising
+`Mace:PoolSize`, or move the belief store behind shared storage.
 
 ### Configuration
 

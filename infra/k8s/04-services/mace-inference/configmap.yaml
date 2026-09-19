@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mace-inference-config
+  namespace: threatsense
+data:
+  # ASP.NET binds these onto the Mace configuration section; a double underscore
+  # separates section from key.
+
+  # The worker roster is fixed at startup: worker ids are positions in the
+  # parameter arrays, so changing this against an existing belief store would
+  # re-point every worker's history onto someone else.
+  Mace__NumWorkers: "7"
+  Mace__NumCategories: "5"
+
+  # Warmed models per replica. Caps concurrent inference, since Infer.NET's
+  # engine cannot be shared between threads.
+  Mace__PoolSize: "4"
+  Mace__Iterations: "50"
+
+  # Shared by every pooled model so an answer does not depend on which slot
+  # served it.
+  Mace__Seed: "42"
+
+  # Weight given to one resolved item's evidence.
+  Mace__LearningRate: "0.5"
+
+  # Share of accumulated evidence surviving each update. Below 1.0 the counts
+  # settle at LearningRate / (1 - Retention), so 0.99 means a worker's
+  # reliability reflects roughly their last 50 judged items and a worker whose
+  # behaviour changes gets re-learned. 1.0 never forgets.
+  Mace__Retention: "0.99"
+
+  # Without this, everything learned about workers is lost on restart.
+  # Backed by the PVC mounted in the deployment.
+  Mace__BeliefStorePath: "/var/lib/mace/workers.txt"

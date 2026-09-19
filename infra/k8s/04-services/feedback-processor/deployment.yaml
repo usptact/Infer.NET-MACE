@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feedback-processor
+  namespace: threatsense
+spec:
+  replicas: 1   # single writer for prior updates — avoids concurrent Beta update races
+  selector:
+    matchLabels:
+      app: feedback-processor
+  template:
+    metadata:
+      labels:
+        app: feedback-processor
+    spec:
+      containers:
+      - name: feedback-processor
+        image: 192.168.10.201:5000/threatsense/feedback-processor:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: POSTGRES_HOST
+          value: "postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "threatsense"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_USER
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        - name: LEARNING_RATE
+          value: "0.5"
+        - name: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
+          value: "1"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10

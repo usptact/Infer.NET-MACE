@@ -1,0 +1,27 @@
+grafana:
+  adminPassword: changeme   # set a real password
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts: ["192.168.10.201"]
+    path: /grafana
+    pathType: Prefix
+  grafana.ini:
+    server:
+      root_url: "https://192.168.10.201/grafana"
+      serve_from_sub_path: true
+
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 50Gi
+
+alertmanager:
+  enabled: false   # use ThreatSense's own alerting for security events

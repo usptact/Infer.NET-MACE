@@ -1,0 +1,49 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: threatsense-services
+  namespace: monitoring
+  labels:
+    release: monitoring   # must match kube-prometheus-stack label selector
+spec:
+  namespaceSelector:
+    matchNames:
+    - threatsense
+  selector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - sensor-gateway
+      - incident-manager
+      - mace-inference
+      - threat-score-svc
+      - feedback-processor
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: threatsense-infra
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - threatsense
+  selector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - redis
+      - postgres
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s

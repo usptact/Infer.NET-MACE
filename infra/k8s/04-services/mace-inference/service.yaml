@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mace-inference
+  namespace: threatsense
+spec:
+  type: ClusterIP
+  selector:
+    app: mace-inference
+  ports:
+  # gRPC needs HTTP/2; metrics and probes need HTTP/1.1. They cannot share a
+  # plaintext listener, so the service exposes both.
+  - name: grpc
+    port: 8080
+    targetPort: grpc
+    appProtocol: grpc
+  - name: metrics
+    port: 9090
+    targetPort: metrics
