@@ -106,6 +106,23 @@ namespace MACE
         }
 
         /// <summary>
+        /// Whether the inference engine writes its per-iteration progress to the console.
+        /// </summary>
+        /// <remarks>
+        /// Infer.NET writes progress straight to <see cref="Console"/>, which is useful for a
+        /// command-line run and noise inside a service that routes its output through a logger.
+        /// </remarks>
+        public bool ShowProgress
+        {
+            get => InferenceEngine.ShowProgress;
+            set
+            {
+                InferenceEngine.ShowProgress = value;
+                InferenceEngine.ShowTimings = value;
+            }
+        }
+
+        /// <summary>
         /// Sets the prior distributions for the model parameters.
         /// </summary>
         /// <param name="priors">Prior distributions for worker parameters.</param>

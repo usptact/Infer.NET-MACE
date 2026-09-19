@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MACE\MACE.csproj" />
+    <ProjectReference Include="..\MACE.Service\MACE.Service.csproj" />
   </ItemGroup>
 
   <!-- The shipped sample and its ground truth are the regression corpus. -->

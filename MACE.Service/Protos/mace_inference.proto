@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+option csharp_namespace = "MACE.Service.Grpc";
+
+package mace.inference.v1;
+
+// Serves MACE label inference over a fixed set of workers, and moves worker
+// reliability estimates as items are resolved.
+//
+// Workers are identified by a stable zero-based index agreed with the caller.
+// The service is configured with the worker and category counts at startup and
+// rejects anything outside those ranges, because an index that silently shifts
+// would attribute one worker's history to another.
+service MaceInference {
+  // Infers the label of a single item from the annotations supplied.
+  // Worker reliability is not changed by this call.
+  rpc InferLabel(InferLabelRequest) returns (InferLabelResponse);
+
+  // Updates worker reliability from an item whose true label is now known.
+  rpc SubmitFeedback(SubmitFeedbackRequest) returns (SubmitFeedbackResponse);
+
+  // Returns the current reliability estimate for every worker.
+  rpc GetWorkerReliability(GetWorkerReliabilityRequest) returns (GetWorkerReliabilityResponse);
+}
+
+// One worker's annotation of an item.
+message Annotation {
+  // Zero-based worker index.
+  int32 worker = 1;
+  // Label the worker assigned, in [0, num_categories).
+  int32 label = 2;
+}
+
+message InferLabelRequest {
+  // Caller's identifier for the item, echoed back. Not interpreted.
+  string item_id = 1;
+  // At most one annotation per worker. An empty list is accepted and returns
+  // the prior, with contributing_workers empty to say the answer carries no
+  // evidence.
+  repeated Annotation annotations = 2;
+}
+
+// How likely each worker was to be spamming on this item.
+message WorkerAssessment {
+  int32 worker = 1;
+  double spammer_probability = 2;
+}
+
+message InferLabelResponse {
+  string item_id = 1;
+  // Most probable label.
+  int32 label = 2;
+  // Probability of the reported label.
+  double confidence = 3;
+  // Shannon entropy of the posterior in nats, 0 (certain) to ln(num_categories)
+  // (no information). Distinguishes one strong runner-up from an even spread,
+  // which confidence alone cannot.
+  double entropy = 4;
+  // Full posterior, indexed by label.
+  repeated double label_probabilities = 5;
+  // Only the workers who annotated this item.
+  repeated WorkerAssessment worker_assessments = 6;
+  // Workers whose annotations informed this answer.
+  repeated int32 contributing_workers = 7;
+}
+
+message SubmitFeedbackRequest {
+  string item_id = 1;
+  // The annotations as they were when the item was inferred.
+  repeated Annotation annotations = 2;
+  // The established true label.
+  int32 true_label = 3;
+  // Weight given to this item's evidence. Omit for the service default.
+  optional double learning_rate = 4;
+  // Share of accumulated evidence that survives, in (0, 1]. Omit for the
+  // service default. 1.0 never forgets, which stops workers from being
+  // re-learned after their behaviour changes.
+  optional double retention = 5;
+}
+
+// A worker's reliability after an update.
+message WorkerReliability {
+  int32 worker = 1;
+  // Posterior mean of theta: how often this worker spams.
+  double spammer_probability = 2;
+  // Posterior mean of phi: the labels this worker favours when spamming.
+  repeated double spam_preferences = 3;
+  // Total evidence accumulated for this worker, as a count of items.
+  double evidence = 4;
+}
+
+message SubmitFeedbackResponse {
+  string item_id = 1;
+  // Only the workers the feedback moved.
+  repeated WorkerReliability updated = 2;
+}
+
+message GetWorkerReliabilityRequest {
+  // Workers to report on. Empty returns all of them.
+  repeated int32 workers = 1;
+}
+
+message GetWorkerReliabilityResponse {
+  repeated WorkerReliability workers = 1;
+}

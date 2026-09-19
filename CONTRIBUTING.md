@@ -83,6 +83,16 @@ MACE/
   MACETrain.cs      # Observation model and EP inference
   ModelData.cs      # Container for prior/posterior distributions
   ModelPriorsIo.cs  # Persists priors between runs for incremental use
+  Online/
+    OnlineInferenceResult.cs  # Single-item inference result
+    PriorUpdateService.cs     # Supervised feedback with forgetting
+    InferencePool.cs          # Warmed, leased models for concurrent serving
+MACE.Service/
+  Program.cs                  # gRPC host, Serilog, Prometheus
+  ServiceOptions.cs           # Configuration bound from the Mace section
+  BeliefStore.cs              # Current worker parameters, serialised across threads
+  Protos/mace_inference.proto # Service contract
+  Services/                   # gRPC implementation
   CsvReader.cs      # CSV parsing and input validation
   Program.cs        # CLI entry point and output formatting
 MACE.Tests/
@@ -90,6 +100,7 @@ MACE.Tests/
   InferenceTests.cs           # Accuracy regression, seeding, posterior shape
   MACETrainValidationTests.cs # Model argument validation
   ModelPriorsIoTests.cs       # Prior persistence round-trip and validation
+  Online/                     # Online inference, feedback, pool, gRPC service
   TestSupport.cs              # Fixtures and inference helpers
   sample_data.txt   # Sample annotation matrix for manual testing
 MACE.sln

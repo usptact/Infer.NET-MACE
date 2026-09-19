@@ -20,6 +20,7 @@ A modern .NET 10.0 implementation of the MACE (Multi-Annotator Competence Estima
 - [Data Quality Best Practices](#data-quality-best-practices)
 - [Example](#example)
 - [Incremental Runs](#incremental-runs)
+- [Online Inference Service](#online-inference-service)
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 - [References](#references)
@@ -367,6 +368,53 @@ dotnet run --project MACE -- batch2.csv --load-priors workers.txt
 ```
 
 Both batches must share the same worker columns and label set; a mismatch is rejected rather than silently reinterpreted. Only carry priors forward onto **new** annotations — re-running the same data against its own posterior counts that evidence twice and reports false confidence.
+
+## Online Inference Service
+
+Batch mode scores a whole annotation file at once. When items arrive one at a time and workers are
+judged as results come back, `MACE.Service` serves the same model over gRPC:
+
+```bash
+dotnet run --project MACE.Service    # gRPC on :5199, Prometheus metrics on :5200
+```
+
+Three calls:
+
+- `InferLabel` — infers one item's label from the annotations supplied. Reads worker reliability,
+  never changes it.
+- `SubmitFeedback` — given an item's established true label, updates the workers who annotated it.
+- `GetWorkerReliability` — current spammer probability, spam preferences and accumulated evidence
+  per worker.
+
+Inference and feedback are separate on purpose. A single item carries far too little evidence to
+re-estimate worker reliability, and folding the two together would let one unreviewed item rewrite a
+worker's history.
+
+### Forgetting
+
+Feedback accumulates evidence, so without forgetting a worker's parameters harden permanently and a
+worker whose behaviour changes can never be re-learned. `Mace:Retention` controls this: below 1.0,
+old evidence decays and the accumulated counts settle at `LearningRate / (1 - Retention)`. The
+default of 0.99 means a worker's reliability reflects roughly their last 50 judged items. Set it to
+1.0 to accumulate without limit.
+
+### Configuration
+
+Bound from the `Mace` section of `appsettings.json`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `NumWorkers` | 8 | Size of the worker roster. Fixed at startup, since indices are array positions. |
+| `NumCategories` | 3 | Number of label categories. |
+| `PoolSize` | 4 | Warmed models, which caps concurrent inference. |
+| `Iterations` | 50 | EP iterations per call. |
+| `Seed` | 42 | Shared by every pooled model so the answer does not depend on the slot. |
+| `LearningRate` | 0.5 | Weight given to one item's evidence. |
+| `Retention` | 0.99 | Share of accumulated evidence surviving each update. |
+| `BeliefStorePath` | null | Where to load and save worker parameters. Null keeps them in memory only. |
+
+Worker reliability lives in memory and is written to `BeliefStorePath` at shutdown. Leave that unset
+and everything learned is lost on restart — the service warns at startup when that is the case.
 
 ## API Documentation
 

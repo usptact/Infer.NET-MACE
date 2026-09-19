@@ -14,6 +14,9 @@ dotnet build
 # Run the test suite
 dotnet test
 
+# Run the gRPC inference service (gRPC on :5199, metrics on :5200)
+dotnet run --project MACE.Service
+
 # Run on a CSV annotation file
 dotnet run --project MACE -- MACE/sample_data.txt
 
@@ -25,7 +28,12 @@ Tests live in `MACE.Tests` (xUnit). `MACE/sample_data.txt` and `MACE/true_labels
 
 ## Architecture
 
-This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) implementing the MACE algorithm ("Learning Whom to Trust with MACE", Hovy et al., NAACL 2013) for crowdsourcing annotation quality estimation. It uses [Microsoft Infer.NET](https://dotnet.github.io/infer/) (`Microsoft.ML.Probabilistic`) for expectation propagation (EP) inference.
+The solution has three projects. `MACE` is the library and batch CLI, `MACE.Service` is a gRPC host
+serving one item at a time, and `MACE.Tests` covers both. `MACE.Service` is a separate project on
+purpose: making the library itself a web app would break the CLI and force every consumer to take a
+hosting dependency.
+
+The core is a .NET 10.0 application (`MACE/MACE.csproj`) implementing the MACE algorithm ("Learning Whom to Trust with MACE", Hovy et al., NAACL 2013) for crowdsourcing annotation quality estimation. It uses [Microsoft Infer.NET](https://dotnet.github.io/infer/) (`Microsoft.ML.Probabilistic`) for expectation propagation (EP) inference.
 
 ### Data flow
 
@@ -34,6 +42,25 @@ This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) impl
 3. `Program.Main` builds uniform priors (`Beta(1,1)` for spammer rates θ, `Dirichlet(1,...,1)` for spammer label preferences φ) and constructs `MACETrain`, which builds the model in its constructor.
 4. `MACETrain.InferModelData(annotations, priors)` binds the observed data and calls `InferenceEngine.Infer` for each latent variable, returning a `ModelPosterior`.
 5. Results are written to three CSV files: item label posteriors, per-annotation spammer probabilities, and per-worker competence.
+
+### Online serving (`MACE/Online`, `MACE.Service`)
+
+Batch inference estimates worker reliability and true labels together from a whole annotation matrix.
+Serving splits that in two, because a single item carries nowhere near enough evidence to move a
+worker's reliability, and letting it try would let one annotation rewrite a worker's whole history.
+
+- **`MACETrain.ForOnlineInference` / `InferOnline`** — single-item inference against fixed worker
+  parameters. Takes a flat per-worker array (`MACETrain.MissingAnnotation` for absent workers) and
+  returns `OnlineInferenceResult`. Worker parameters are read, never written.
+- **`PriorUpdateService`** — the supervised half. Given an item's established true label, it moves
+  the workers who annotated it, in closed form with no Infer.NET involvement. `retention` below 1.0
+  decays old evidence so a worker whose behaviour changes can be re-learned;
+  `EffectiveSampleSize(learningRate, retention)` is how many items a worker's reliability reflects.
+- **`InferencePool`** — warms N models at construction and leases them out one caller at a time,
+  because Infer.NET's engine is not thread-safe and compiling a model costs seconds.
+- **`MACE.Service`** — gRPC surface (`InferLabel`, `SubmitFeedback`, `GetWorkerReliability`) over
+  those three, plus `BeliefStore` holding the current parameters. Serilog for logs, Prometheus at
+  `/metrics`.
 
 ### Probabilistic model
 
@@ -50,6 +77,15 @@ This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) impl
 - **Items and workers with no annotations are still inferred.** Their posteriors are the priors, so the label reported for such an item is an argmax over a uniform distribution and the competence reported for such a worker is whatever the prior said — neither is a measurement. `CheckWorkerCoverage` warns about both, separately from thin item coverage. The same caveat applies to any exactly tied posterior.
 - **`CsvReader.Read()` may be called once per instance.** The stream is consumed, so a second call throws rather than reporting an empty file and doubling the item count.
 - **Carrying priors forward is only valid onto new annotations.** Re-running the same data against its own posterior counts that evidence twice and reports false confidence. `ModelPriorsIo` cannot detect this; the docs warn instead.
+- **Annotations must stay observed values, never model structure.** `InferOnline` passes them
+  through `SparseAnnotations`, so the compiled algorithm is reused and calls cost ~2ms. Expressing
+  missingness as a gate over a sentinel (`Variable.If(reading > -1)`) instead makes the data part of
+  the model's structure, which recompiles per call — that shape measured ~500ms per call on a smaller
+  problem. `RepeatedCallsDoNotRecompileTheModel` guards this.
+- **DI singletons are lazy.** `MACE.Service` resolves the pool and belief store immediately after
+  `builder.Build()`; without that the first request pays the compilation the pool exists to avoid.
+- **The service needs two ports.** gRPC over plaintext requires HTTP/2, which Prometheus scraping and
+  a browser cannot speak, so Kestrel exposes gRPC on 5199 and observability on 5200.
 - **`SDist` is indexed by annotation slot, not worker.** `SDist[item][k]` is parallel to `annotations.WorkerIndices[item][k]`; the actual worker index is `WorkerIndices[item][k]`. `WriteSpammerProbabilitiesToCsv` needs the annotations alongside the posterior for exactly this reason.
 - **`GetNumCategories()` returns the category *count*** (`max(label) + 1`), not the max label value. `Program.cs` passes it to the model constructor unchanged — do not add 1.
 - **Two validation passes with different severity.** `CheckWorkerCoverage()` only *warns* (messages surface via `GetValidationMessages()`) when an item has fewer than 3 annotators; inference still runs. `ValidateLabelRange()` *throws* when the observed labels have a gap (e.g. `{0, 2}`), because a phantom category would silently skew inference.

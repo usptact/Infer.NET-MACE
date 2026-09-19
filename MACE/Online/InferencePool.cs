@@ -80,6 +80,10 @@ namespace MACE.Online
                 var model = MACETrain.ForOnlineInference(
                     options.NumWorkers, options.NumCategories, options.Iterations, options.Seed);
 
+                // Infer.NET writes iteration progress straight to the console, which would bypass
+                // whatever logger the host has configured and emit a line per request.
+                model.ShowProgress = false;
+
                 // Run one throwaway inference so this model has compiled before it serves a request.
                 model.InferOnline(warmUpAnnotations, warmUpPriors);
 
