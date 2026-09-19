@@ -1,52 +1,48 @@
-# ThreatSense Infrastructure
+# Deploying the MACE inference service
 
-Kubernetes manifests, Dockerfiles, and setup scripts for deploying ThreatSense on a physical server rack.
-
-See [../INFRASTRUCTURE.md](../INFRASTRUCTURE.md) for the full deployment guide.
-
-## Quick Reference
+Manifests for the service built from this repository. Everything here refers to
+code that is present and buildable.
 
 ```
-infra/
-├── k3s/                  # cluster bootstrap scripts
-├── helm-values/          # Helm chart configuration
-├── k8s/
-│   ├── 00-namespace.yaml
-│   ├── 01-infrastructure/  mqtt / redis / postgres
-│   ├── 02-registry/        private container registry
-│   ├── 03-network/         ingress, TLS, network policies
-│   ├── 04-services/        all ThreatSense application services
-│   └── 05-monitoring/      Prometheus ServiceMonitors + Grafana dashboards
-├── docker-compose.yml    # local development
-└── Makefile              # build / push / deploy
-
-dockerfiles/
-├── sensor-gateway/
-├── incident-manager/
-├── mace-inference/       # NOTE: debian base required (Infer.NET MKL)
-├── threat-score-svc/
-├── feedback-processor/
-└── operator-console/     # node:20 build → nginx:alpine serve
+infra/k8s/
+├── 00-namespace.yaml
+├── 04-services/mace-inference/   deployment, service, configmap, pvc
+└── 05-monitoring/                ServiceMonitor for the metrics port
 ```
 
-## Common Tasks
+Build and deploy:
 
-| Task | Command |
-|---|---|
-| Build all images | `make -C infra build` |
-| Push to registry | `make -C infra push` |
-| Deploy/update | `make -C infra deploy TAG=<sha>` |
-| View pod status | `make -C infra status` |
-| Tail service logs | `make -C infra logs SVC=mace-inference` |
-| Local dev stack | `docker compose -f infra/docker-compose.yml up -d` |
+```bash
+docker build -f dockerfiles/mace-inference/Dockerfile -t mace-inference .
+kubectl apply -f infra/k8s/00-namespace.yaml
+kubectl apply -f infra/k8s/04-services/mace-inference/
+kubectl apply -f infra/k8s/05-monitoring/
+```
 
-## Environment Variables to Change Before Deploying
+For local work, `docker-compose.yml` at the repository root runs the service
+together with the REST gateway, Prometheus and Grafana, and needs no cluster.
 
-| File | Variable | Action |
-|---|---|---|
-| `k8s/01-infrastructure/postgres/secret.yaml` | `POSTGRES_PASSWORD` | Generate new, base64-encode |
-| `helm-values/metallb-ippool.yaml` | IP range | Match your sensor VLAN |
-| `helm-values/nfs-provisioner-values.yaml` | `nfs.server` | Your NAS IP |
-| `k8s/03-network/certificate.yaml` | `ipAddresses` | Your ingress IP |
-| `k8s/02-registry/k3s-registries.yaml` | Registry IP | Your ingress IP |
-| All `deployment.yaml` files | `image:` | Your registry IP |
+## Two things worth knowing before changing these
+
+**The deployment is a single replica on purpose.** Worker reliability lives in
+the process and is written to `Mace__BeliefStorePath` at shutdown. A second
+replica would learn from whichever feedback reached it, drift away from the
+first, and overwrite its file on exit — so scaling out would lose evidence
+rather than share it. Serve more load by raising `Mace__PoolSize`, which raises
+concurrency inside one process. Sharing reliability across replicas means moving
+the belief store behind shared storage, which is a change to `BeliefStore`, not
+to a manifest.
+
+**Probes and scrapes must target the metrics port.** gRPC over plaintext
+requires HTTP/2, which a kubelet probe and a Prometheus scrape cannot speak, so
+the container exposes gRPC on 8080 and everything else on 9090.
+
+## The wider deployment
+
+These manifests were extracted from the ThreatSense stack, where this service
+was one of six. The rest of that deployment — sensor ingest, incident
+correlation, threat scoring, the operator console, the feedback processor, and
+the MQTT, Postgres, Redis, registry and network layers underneath them — is kept
+under [`docs/threatsense/`](../docs/threatsense/) as reference. Those manifests
+build from source that is not in this repository and cannot be deployed from
+here.

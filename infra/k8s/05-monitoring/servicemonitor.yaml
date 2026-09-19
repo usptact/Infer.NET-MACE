@@ -1,0 +1,24 @@
+---
+# Scrapes this repository's inference service. The wider ThreatSense
+# ServiceMonitors, which also select the services that are not built here, are
+# in docs/threatsense/infra/k8s/05-monitoring/.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mace-inference
+  namespace: monitoring
+  labels:
+    release: monitoring   # must match the kube-prometheus-stack label selector
+spec:
+  namespaceSelector:
+    matchNames:
+    - threatsense
+  selector:
+    matchLabels:
+      app: mace-inference
+  endpoints:
+  # The metrics port, not the gRPC one: a scrape speaks HTTP/1.1 and the gRPC
+  # listener is HTTP/2 only.
+  - port: metrics
+    path: /metrics
+    interval: 15s

@@ -418,10 +418,14 @@ The gateway in `test-client/` bridges HTTP to gRPC, so the service can be exerci
 over plaintext requires HTTP/2, which probes and scrapers cannot speak, which is why metrics and
 health live on their own port.
 
-Kubernetes manifests are in `infra/`. The deployment runs a **single replica** on purpose: worker
-reliability lives in the process and is persisted at shutdown, so a second replica would learn
-separately, diverge, and overwrite the first one's state. Serve more load by raising
-`Mace:PoolSize`, or move the belief store behind shared storage.
+Kubernetes manifests for this service are in [`infra/`](infra/). The deployment runs a **single
+replica** on purpose: worker reliability lives in the process and is persisted at shutdown, so a
+second replica would learn separately, diverge, and overwrite the first one's state. Serve more load
+by raising `Mace:PoolSize`, or move the belief store behind shared storage.
+
+The wider deployment this model was built into, and its design documents, are kept for reference
+under [`docs/threatsense/`](docs/threatsense/). Those manifests build from source that is not in this
+repository and cannot be deployed from here.
 
 ### Configuration
 

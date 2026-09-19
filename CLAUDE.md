@@ -68,12 +68,17 @@ worker's reliability, and letting it try would let one annotation rewrite a work
 ### Deployment and ported material
 
 `docker-compose.yml` runs the service, the Python REST gateway in `test-client/`, Prometheus and
-Grafana. `infra/` and the design docs (`THREATSENSE_DESIGN.md`, `MACE_SERVICE_DESIGN.md`,
-`SCENARIO.md`, `PRESENTATION.md`, `INFRASTRUCTURE.md`, `ISSUES.md`) came from the `online-mace`
-branch and describe the ThreatSense product this model was deployed in. Each doc opens with a banner
-saying what is still true. The `mace-inference` manifests, the Dockerfile, the dashboards and the
-test gateway were rewritten against the current service; the manifests for the other ThreatSense
-services are kept as reference and build from source that is not in this repository.
+Grafana; it needs no cluster and is the quickest way to exercise the service. `infra/` holds the
+Kubernetes manifests for *this* service only — namespace, deployment, service, configmap, PVC and a
+ServiceMonitor — all of which refer to code that is present and buildable.
+
+`docs/threatsense/` is reference material carried over from the `online-mace` branch: the wider
+six-service deployment this model ran inside, plus its design documents. None of it is deployable
+from here, because those manifests build from source in other repositories. It is kept because it
+explains decisions that still matter — in particular why the original inference service was
+stateless (its belief store lived in Redis, written by a single-replica feedback processor), which
+is the shape to return to if this service ever needs more than one replica. Each document opens with
+a banner recording which of its claims still hold.
 
 ### Probabilistic model
 
