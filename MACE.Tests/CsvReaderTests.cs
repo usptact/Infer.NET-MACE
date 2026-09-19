@@ -147,6 +147,49 @@ namespace MACE.Tests
             Assert.Contains(messages, m => m.Contains("Item 2"));
         }
 
+        /// <summary>
+        /// An item nobody annotated is still inferred, but it is called out on its own rather than
+        /// folded into the thin-coverage warning, because its reported label carries no information.
+        /// </summary>
+        [Fact]
+        public void Read_ItemWithNoAnnotations_WarnsSeparately()
+        {
+            using var csv = new TempCsv("w1,w2,w3,w4", "0,1,0,1", ",,,", "1,1,0,0");
+            using var reader = new CsvReader(csv.Path);
+            reader.Read();
+
+            var messages = reader.GetValidationMessages();
+            Assert.Contains(messages, m => m.Contains("no annotations at all"));
+            Assert.Contains(messages, m => m.Contains("Item 2"));
+            Assert.DoesNotContain(messages, m => m.Contains("fewer than 3 workers"));
+        }
+
+        [Fact]
+        public void Read_ItemWithNoAnnotations_IsStillReturnedAsAnEmptySlot()
+        {
+            using var csv = new TempCsv("w1,w2,w3,w4", "0,1,0,1", ",,,", "1,1,0,0");
+            using var reader = new CsvReader(csv.Path);
+            reader.Read();
+
+            var sparse = reader.GetSparseData();
+
+            Assert.Equal(3, reader.GetNumItems());
+            Assert.Empty(sparse.WorkerIndices[1]);
+            Assert.Empty(sparse.Labels[1]);
+        }
+
+        [Fact]
+        public void Read_ZeroAndThinCoverage_AreReportedIndependently()
+        {
+            using var csv = new TempCsv("w1,w2,w3,w4", "0,1,0,1", ",,,", "1,,,");
+            using var reader = new CsvReader(csv.Path);
+            reader.Read();
+
+            var messages = reader.GetValidationMessages();
+            Assert.Contains(messages, m => m.Contains("no annotations at all"));
+            Assert.Contains(messages, m => m.Contains("fewer than 3 workers"));
+        }
+
         [Fact]
         public void Read_FullyCoveredData_ProducesNoWarnings()
         {

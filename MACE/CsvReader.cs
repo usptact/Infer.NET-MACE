@@ -17,8 +17,9 @@
     /// The CSV format expects a header row with worker names, followed by rows of annotation data.
     /// Missing annotations are represented by empty cells.
     ///
-    /// Data Quality Requirements:
-    /// - Each work item must be seen by at least 3 different workers
+    /// Coverage expectations are advisory, not enforced: items annotated by fewer than 3 workers,
+    /// and items with no annotations at all, are reported through <see cref="GetValidationMessages"/>
+    /// and still take part in inference.
     /// </summary>
     public class CsvReader : IDisposable
     {
@@ -218,9 +219,14 @@
         public IReadOnlyList<string> GetValidationMessages() => _validationMessages;
 
         /// <summary>
-        /// Checks that each item has been annotated by at least 3 workers and emits
-        /// a warning for any that fall below that threshold.
+        /// Checks annotation coverage per item and emits warnings for thin or absent coverage.
         /// </summary>
+        /// <remarks>
+        /// Items with no annotations at all are reported separately from merely thin ones. They are
+        /// still inferred, but nothing in the data constrains them: their posterior is the prior, and
+        /// the label the output CSV reports for them is an artefact of taking an argmax over a
+        /// uniform distribution rather than a conclusion drawn from any annotation.
+        /// </remarks>
         private void CheckWorkerCoverage()
         {
             if (_dataList == null)
@@ -230,7 +236,9 @@
 
             _validationMessages.Clear();
 
+            var itemsWithNoWorkers = new List<int>();
             var itemsWithInsufficientWorkers = new List<int>();
+
             for (int item = 0; item < _numItems; item++)
             {
                 int workerCount = 0;
@@ -242,9 +250,24 @@
                     }
                 }
 
-                if (workerCount < 3)
+                if (workerCount == 0)
+                {
+                    itemsWithNoWorkers.Add(item + 1);
+                }
+                else if (workerCount < 3)
                 {
                     itemsWithInsufficientWorkers.Add(item + 1);
+                }
+            }
+
+            if (itemsWithNoWorkers.Count > 0)
+            {
+                _validationMessages.Add(
+                    $"WARNING: {itemsWithNoWorkers.Count} items have no annotations at all. They are still "
+                    + "inferred, but their posterior is the prior and the reported label is arbitrary:");
+                foreach (int item in itemsWithNoWorkers)
+                {
+                    _validationMessages.Add($"  - Item {item}");
                 }
             }
 

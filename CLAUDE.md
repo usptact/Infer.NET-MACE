@@ -33,7 +33,7 @@ This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) impl
 2. `CsvReader.GetSparseData()` converts the matrix into `SparseAnnotations` — only the observed (item, worker, label) triples.
 3. `Program.Main` builds uniform priors (`Beta(1,1)` for spammer rates θ, `Dirichlet(1,...,1)` for spammer label preferences φ) and constructs `MACETrain`, which builds the model in its constructor.
 4. `MACETrain.InferModelData(annotations, priors)` binds the observed data and calls `InferenceEngine.Infer` for each latent variable, returning a `ModelPosterior`.
-5. Results are written to two CSV files: item label posteriors and per-annotation spammer probabilities.
+5. Results are written to three CSV files: item label posteriors, per-annotation spammer probabilities, and per-worker competence.
 
 ### Probabilistic model
 
@@ -42,10 +42,13 @@ This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) impl
   - Call order is enforced structurally: the constructor validates dimensions, builds the arrays, calls `CreateModel()`, and sets the iteration count, so there is no half-built state. `InferModelData` is the only other entry point.
 - **`ModelPriors` / `ModelPosterior`** (both in `ModelData.cs`) — `ModelPosterior` *inherits* from `ModelPriors`, so a completed run's output can be passed straight back in as priors for incremental/online learning. `ModelPosterior` adds `Discrete[] TDist` (item label posteriors) and `Bernoulli[][] SDist` (spammer indicators).
 - **`SparseAnnotations`** (in `CsvReader.cs`) — `int[][] WorkerIndices` and `int[][] Labels`, parallel per item.
-- **`CsvReader : IDisposable`** — Reads CSV into a dense `List<int[]>` (missing = -1) and exposes it as `SparseAnnotations`.
+- **`CsvReader : IDisposable`** — Reads CSV into a dense `List<int[]>` (missing = -1) and exposes it as `SparseAnnotations`. Coverage problems are advisory: items with no annotations and items with fewer than 3 are reported separately through `GetValidationMessages()` and still take part in inference.
+- **`ModelPriorsIo`** — Persists `ModelPriors` as a small text file, which is what makes the incremental path (`--save-priors` / `--load-priors`) reachable across processes. A worker or category count that disagrees with the current dataset is rejected rather than reinterpreted.
 
 ### Important nuances
 
+- **Items with no annotations are still inferred.** Their posterior is the prior, so the label the CSV reports for them is an argmax over a uniform distribution, not a conclusion. `CheckWorkerCoverage` warns about them separately from thin coverage. The same caveat applies to any exactly tied posterior.
+- **Carrying priors forward is only valid onto new annotations.** Re-running the same data against its own posterior counts that evidence twice and reports false confidence. `ModelPriorsIo` cannot detect this; the docs warn instead.
 - **`SDist` is indexed by annotation slot, not worker.** `SDist[item][k]` is parallel to `annotations.WorkerIndices[item][k]`; the actual worker index is `WorkerIndices[item][k]`. `WriteSpammerProbabilitiesToCsv` needs the annotations alongside the posterior for exactly this reason.
 - **`GetNumCategories()` returns the category *count*** (`max(label) + 1`), not the max label value. `Program.cs` passes it to the model constructor unchanged — do not add 1.
 - **Two validation passes with different severity.** `CheckWorkerCoverage()` only *warns* (messages surface via `GetValidationMessages()`) when an item has fewer than 3 annotators; inference still runs. `ValidateLabelRange()` *throws* when the observed labels have a gap (e.g. `{0, 2}`), because a phantom category would silently skew inference.

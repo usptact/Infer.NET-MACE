@@ -23,9 +23,21 @@ namespace MACE
                 if (args.Length < 1)
                 {
                     Console.WriteLine("Usage: MACE.exe <CSV_FILE> [--iterations N] [--seed N]");
+                    Console.WriteLine("                          [--check-convergence]");
+                    Console.WriteLine("                          [--load-priors FILE] [--save-priors FILE]");
                     Console.WriteLine();
                     Console.WriteLine("  --iterations N   Number of EP inference iterations (default: 50).");
                     Console.WriteLine("                   Increase if results seem unstable across runs.");
+                    Console.WriteLine("  --load-priors FILE");
+                    Console.WriteLine("                   Start from worker parameters learned in an earlier run");
+                    Console.WriteLine("                   instead of uniform priors.");
+                    Console.WriteLine("  --save-priors FILE");
+                    Console.WriteLine("                   Write this run's worker posteriors for a later --load-priors.");
+                    Console.WriteLine("                   Only carry priors forward onto NEW annotations; re-running the");
+                    Console.WriteLine("                   same data counts its evidence twice.");
+                    Console.WriteLine("  --check-convergence");
+                    Console.WriteLine("                   Re-run with 10 extra iterations and report how much the");
+                    Console.WriteLine("                   item posteriors move. Doubles the running time.");
                     Console.WriteLine("  --seed N         RNG seed for label initialisation. Runs are already");
                     Console.WriteLine("                   reproducible without it; vary it to explore different");
                     Console.WriteLine("                   fixed points on data with more than one mode.");
@@ -35,12 +47,16 @@ namespace MACE
                     Console.WriteLine("Output files:");
                     Console.WriteLine("  - <input>_item_labels.csv: Inferred label probabilities for each item");
                     Console.WriteLine("  - <input>_worker_spammer_probs.csv: Spammer probabilities for each worker-item pair");
+                    Console.WriteLine("  - <input>_worker_competence.csv: Per-worker spammer rate and label preferences");
                     return 1;
                 }
 
                 string fileName = args[0];
                 int iterations = 50;
                 int? seed = null;
+                bool checkConvergence = false;
+                string? loadPriorsFile = null;
+                string? savePriorsFile = null;
 
                 for (int i = 1; i < args.Length; i++)
                 {
@@ -60,6 +76,18 @@ namespace MACE
                             return 1;
                         }
                         seed = parsedSeed;
+                    }
+                    else if (args[i] == "--check-convergence")
+                    {
+                        checkConvergence = true;
+                    }
+                    else if (args[i] == "--load-priors" && i + 1 < args.Length)
+                    {
+                        loadPriorsFile = args[++i];
+                    }
+                    else if (args[i] == "--save-priors" && i + 1 < args.Length)
+                    {
+                        savePriorsFile = args[++i];
                     }
                     else
                     {
@@ -82,11 +110,13 @@ namespace MACE
                 string outputDir = Path.GetDirectoryName(fileName) ?? ".";
                 string itemLabelsFile = Path.Combine(outputDir, $"{baseName}_item_labels.csv");
                 string spammerProbsFile = Path.Combine(outputDir, $"{baseName}_worker_spammer_probs.csv");
+                string workerCompetenceFile = Path.Combine(outputDir, $"{baseName}_worker_competence.csv");
 
                 Console.WriteLine($"Input file: {fileName}");
                 Console.WriteLine($"Output files:");
                 Console.WriteLine($"  Item labels: {itemLabelsFile}");
                 Console.WriteLine($"  Spammer probabilities: {spammerProbsFile}");
+                Console.WriteLine($"  Worker competence: {workerCompetenceFile}");
                 Console.WriteLine();
 
                 // Read and validate data
@@ -125,8 +155,17 @@ namespace MACE
                 }
 
                 // Initialize MACE model priors
-                Console.WriteLine("Initializing MACE model priors...");
-                var initPriors = InitializePriors(numWorkers, numCategories);
+                ModelPriors initPriors;
+                if (loadPriorsFile != null)
+                {
+                    Console.WriteLine($"Loading MACE model priors from {loadPriorsFile}...");
+                    initPriors = ModelPriorsIo.Load(loadPriorsFile, numWorkers, numCategories);
+                }
+                else
+                {
+                    Console.WriteLine("Initializing MACE model priors...");
+                    initPriors = InitializePriors(numWorkers, numCategories);
+                }
 
                 // Create and train the MACE model
                 Console.WriteLine($"Creating probabilistic model...");
@@ -136,16 +175,29 @@ namespace MACE
                 Console.WriteLine($"Running probabilistic inference ({iterations} iterations{seedInfo})...");
                 var posterior = trainer.InferModelData(annotations, initPriors);
 
+                if (checkConvergence)
+                {
+                    ReportConvergence(posterior, annotations, initPriors, numWorkers, numItems, numCategories, iterations, seed);
+                }
+
                 // Write results to CSV files
                 Console.WriteLine("Writing results to CSV files...");
                 WriteItemLabelsToCsv(posterior, numItems, numCategories, itemLabelsFile);
                 WriteSpammerProbabilitiesToCsv(posterior, annotations, spammerProbsFile);
+                WriteWorkerCompetenceToCsv(posterior, annotations, numWorkers, numCategories, workerCompetenceFile);
+
+                if (savePriorsFile != null)
+                {
+                    ModelPriorsIo.Save(posterior, savePriorsFile);
+                    Console.WriteLine($"Saved worker posteriors to {savePriorsFile}");
+                }
 
                 Console.WriteLine();
                 Console.WriteLine("*** INFERENCE COMPLETED SUCCESSFULLY ***");
                 Console.WriteLine($"Results written to:");
                 Console.WriteLine($"  - {itemLabelsFile}");
                 Console.WriteLine($"  - {spammerProbsFile}");
+                Console.WriteLine($"  - {workerCompetenceFile}");
 
                 return 0;
             }
@@ -172,6 +224,59 @@ namespace MACE
                 ThetaDist: Enumerable.Range(0, numWorkers).Select(_ => new Beta(1, 1)).ToArray(),
                 PhiDist: Enumerable.Range(0, numWorkers).Select(_ => new Dirichlet(uniformConcentration)).ToArray()
             );
+        }
+
+        /// <summary>
+        /// Re-runs inference with 10 extra iterations and reports how far the item posteriors moved.
+        /// </summary>
+        /// <remarks>
+        /// Infer.NET only publishes marginals once a run finishes, so a per-iteration convergence
+        /// hook is not available; comparing two complete runs is the measurement that can actually
+        /// be made. A run that has settled will barely move, while one cut short by the iteration
+        /// limit will not. This costs a second full inference pass, so it is opt-in.
+        /// </remarks>
+        private static void ReportConvergence(
+            ModelPosterior posterior,
+            SparseAnnotations annotations,
+            ModelPriors priors,
+            int numWorkers,
+            int numItems,
+            int numCategories,
+            int iterations,
+            int? seed)
+        {
+            const double tolerance = 1e-6;
+            const int extraIterations = 10;
+
+            Console.WriteLine($"Checking convergence with {extraIterations} extra iterations...");
+
+            var longerRun = new MACETrain(numWorkers, numItems, numCategories, iterations + extraIterations, seed);
+            var longerPosterior = longerRun.InferModelData(annotations, priors);
+
+            double largestChange = 0.0;
+            for (int item = 0; item < numItems; item++)
+            {
+                var settled = longerPosterior.TDist[item].GetProbs();
+                var original = posterior.TDist[item].GetProbs();
+                for (int category = 0; category < numCategories; category++)
+                {
+                    largestChange = Math.Max(largestChange, Math.Abs(settled[category] - original[category]));
+                }
+            }
+
+            if (largestChange < tolerance)
+            {
+                Console.WriteLine(
+                    $"Converged: {extraIterations} more iterations moved item posteriors by at most {largestChange:E2}.");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"WARNING: not converged. {extraIterations} more iterations moved item posteriors by "
+                    + $"{largestChange:E2}, above the {tolerance:E0} tolerance. Re-run with a larger --iterations.");
+            }
+
+            Console.WriteLine();
         }
 
         /// <summary>
@@ -234,6 +339,72 @@ namespace MACE
             catch (Exception ex)
             {
                 throw new InvalidOperationException($"Failed to write item labels to '{outputFile}': {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Writes the per-worker posteriors to a CSV file.
+        /// </summary>
+        /// <remarks>
+        /// This is the answer to "whom should I trust", which the per-annotation spammer file only
+        /// gives indirectly. The annotation count is included because a worker who annotated nothing
+        /// keeps the prior unchanged, and a competence of 0.5 from no evidence should not be read the
+        /// same way as 0.5 earned across many items.
+        /// </remarks>
+        /// <param name="posterior">Posterior distributions from MACE inference.</param>
+        /// <param name="annotations">Sparse annotations, used to report how much evidence each worker contributed.</param>
+        /// <param name="numWorkers">Number of workers in the dataset.</param>
+        /// <param name="numCategories">Number of label categories.</param>
+        /// <param name="outputFile">Path to the output CSV file.</param>
+        private static void WriteWorkerCompetenceToCsv(
+            ModelPosterior posterior,
+            SparseAnnotations annotations,
+            int numWorkers,
+            int numCategories,
+            string outputFile)
+        {
+            try
+            {
+                var annotationCounts = new int[numWorkers];
+                foreach (var itemWorkers in annotations.WorkerIndices)
+                {
+                    foreach (int worker in itemWorkers)
+                    {
+                        annotationCounts[worker]++;
+                    }
+                }
+
+                using var writer = new StreamWriter(outputFile);
+
+                var headerColumns = new List<string> { "Worker", "Annotations", "Spammer_Probability" };
+                for (int category = 0; category < numCategories; category++)
+                {
+                    headerColumns.Add($"Spam_Preference_Label_{category}");
+                }
+
+                writer.WriteLine(string.Join(",", headerColumns));
+
+                for (int worker = 0; worker < numWorkers; worker++)
+                {
+                    var row = new List<string>
+                    {
+                        $"Worker_{worker + 1}",
+                        annotationCounts[worker].ToString(),
+                        $"{posterior.ThetaDist[worker].GetMean():F6}"
+                    };
+
+                    var preferences = posterior.PhiDist[worker].GetMean();
+                    for (int category = 0; category < numCategories; category++)
+                    {
+                        row.Add($"{preferences[category]:F6}");
+                    }
+
+                    writer.WriteLine(string.Join(",", row));
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to write worker competence to '{outputFile}': {ex.Message}", ex);
             }
         }
 

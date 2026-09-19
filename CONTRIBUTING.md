@@ -82,12 +82,14 @@ MACE/
   MACEBase.cs       # Abstract probabilistic model (priors, latent variables)
   MACETrain.cs      # Observation model and EP inference
   ModelData.cs      # Container for prior/posterior distributions
+  ModelPriorsIo.cs  # Persists priors between runs for incremental use
   CsvReader.cs      # CSV parsing and input validation
   Program.cs        # CLI entry point and output formatting
 MACE.Tests/
   CsvReaderTests.cs           # Parsing and input validation
   InferenceTests.cs           # Accuracy regression, seeding, posterior shape
   MACETrainValidationTests.cs # Model argument validation
+  ModelPriorsIoTests.cs       # Prior persistence round-trip and validation
   TestSupport.cs              # Fixtures and inference helpers
   sample_data.txt   # Sample annotation matrix for manual testing
 MACE.sln

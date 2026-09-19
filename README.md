@@ -17,7 +17,9 @@ A modern .NET 10.0 implementation of the MACE (Multi-Annotator Competence Estima
 - [Usage](#usage)
 - [Data Format](#data-format)
 - [Understanding the Output](#understanding-the-output)
+- [Data Quality Best Practices](#data-quality-best-practices)
 - [Example](#example)
+- [Incremental Runs](#incremental-runs)
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 - [References](#references)
@@ -130,17 +132,22 @@ dotnet run --project MACE -- sample_data.txt
 ### Command Line Options
 
 ```bash
-MACE.exe <CSV_FILE> [--iterations N] [--seed N]
+MACE.exe <CSV_FILE> [--iterations N] [--seed N] [--check-convergence]
+                    [--load-priors FILE] [--save-priors FILE]
 ```
 
 **Parameters:**
 - `<CSV_FILE>`: Path to the CSV file containing annotation data
 - `--iterations N`: Number of EP inference iterations (default: 50). Increase if results seem unstable across runs.
 - `--seed N`: RNG seed for label initialisation. Runs are already reproducible without it, because Infer.NET seeds its RNG deterministically; vary this to explore a different fixed point on data that has more than one mode.
+- `--check-convergence`: Re-run with 10 extra iterations and report how far the item posteriors move. A settled run barely moves; one cut short by the iteration limit does not. Doubles the running time, so it is opt-in.
+- `--load-priors FILE`: Start from worker parameters learned in an earlier run instead of uniform priors.
+- `--save-priors FILE`: Write this run's worker posteriors for a later `--load-priors`.
 
 **Output Files:**
 - `<input_name>_item_labels.csv`: Inferred label probabilities for each item
 - `<input_name>_worker_spammer_probs.csv`: Spammer probabilities for each worker-item pair
+- `<input_name>_worker_competence.csv`: Per-worker spammer rate and spam label preferences
 
 **Example:**
 ```bash
@@ -201,7 +208,7 @@ w1,w2,w3,w4,w5,w6,w7,w8
 
 ## Understanding the Output
 
-MACE produces two CSV output files:
+MACE produces three CSV output files:
 
 ### 1. Item Labels CSV (`<input_name>_item_labels.csv`)
 
@@ -256,6 +263,27 @@ Only rows where the worker actually annotated the item are included; missing ann
 3. **Confidence**: Sharp probability distributions indicate high confidence in predictions
 4. **Missing Data**: The model naturally handles incomplete annotation matrices
 5. **Data Quality**: Pay attention to validation warnings - items with insufficient workers may have unreliable predictions
+
+### 3. Worker Competence CSV (`<input_name>_worker_competence.csv`)
+
+The per-worker answer to "whom should I trust", which the per-annotation file above only gives indirectly:
+
+```csv
+Worker,Annotations,Spammer_Probability,Spam_Preference_Label_0,Spam_Preference_Label_1,Spam_Preference_Label_2
+Worker_1,6,0.367033,0.289361,0.462070,0.248569
+Worker_2,7,0.500204,0.355209,0.315232,0.329559
+Worker_7,4,0.733200,0.683858,0.158071,0.158071
+```
+
+**Columns:**
+- `Worker`: Worker identifier
+- `Annotations`: How many annotations this worker contributed
+- `Spammer_Probability`: Posterior mean of theta, the worker's overall spamming rate
+- `Spam_Preference_Label_X`: Posterior mean of phi, the label this worker favours when spamming
+
+**Interpretation:**
+- Worker 7 spams most often (0.73) and falls back on label 0 when it does (0.68)
+- `Annotations` matters when reading the rest of the row: a worker who annotated nothing keeps the prior, and a spammer probability of 0.5 drawn from no evidence must not be read like 0.5 earned across many items
 
 ## Data Quality Best Practices
 
@@ -325,6 +353,17 @@ Results written to:
 - Item 2 is genuinely difficult (low confidence across all three labels)
 - Worker 7 is correctly identified as a spammer (spammer probabilities of 0.69–0.99)
 - Worker 8 has mixed reliability — low spammer probability on most items but elevated on Item 2, reflecting genuine uncertainty in that item's label
+
+## Incremental Runs
+
+`ModelPosterior` derives from `ModelPriors`, so one run's worker parameters can seed the next:
+
+```bash
+dotnet run --project MACE -- batch1.csv --save-priors workers.txt
+dotnet run --project MACE -- batch2.csv --load-priors workers.txt
+```
+
+Both batches must share the same worker columns and label set; a mismatch is rejected rather than silently reinterpreted. Only carry priors forward onto **new** annotations — re-running the same data against its own posterior counts that evidence twice and reports false confidence.
 
 ## API Documentation
 
