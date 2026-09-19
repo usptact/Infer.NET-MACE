@@ -16,7 +16,11 @@ Contributions are welcome. For significant changes — new features, model modif
    ```bash
    dotnet build
    ```
-4. Run the sample to confirm the model produces sensible output:
+4. Run the tests:
+   ```bash
+   dotnet test
+   ```
+5. Run the sample to confirm the model produces sensible output:
    ```bash
    dotnet run --project MACE -- MACE/sample_data.txt
    ```
@@ -80,6 +84,11 @@ MACE/
   ModelData.cs      # Container for prior/posterior distributions
   CsvReader.cs      # CSV parsing and input validation
   Program.cs        # CLI entry point and output formatting
+MACE.Tests/
+  CsvReaderTests.cs           # Parsing and input validation
+  InferenceTests.cs           # Accuracy regression, seeding, posterior shape
+  MACETrainValidationTests.cs # Model argument validation
+  TestSupport.cs              # Fixtures and inference helpers
   sample_data.txt   # Sample annotation matrix for manual testing
 MACE.sln
 ```

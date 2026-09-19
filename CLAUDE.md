@@ -11,6 +11,9 @@ dotnet restore
 # Build
 dotnet build
 
+# Run the test suite
+dotnet test
+
 # Run on a CSV annotation file
 dotnet run --project MACE -- MACE/sample_data.txt
 
@@ -18,7 +21,7 @@ dotnet run --project MACE -- MACE/sample_data.txt
 dotnet run --project MACE -- MACE/sample_data.txt --iterations 100 --seed 42
 ```
 
-There are no automated tests in this project.
+Tests live in `MACE.Tests` (xUnit). `MACE/sample_data.txt` and `MACE/true_labels.txt` are linked into the test output and serve as the accuracy regression corpus.
 
 ## Architecture
 
@@ -46,5 +49,6 @@ This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) impl
 - **`SDist` is indexed by annotation slot, not worker.** `SDist[item][k]` is parallel to `annotations.WorkerIndices[item][k]`; the actual worker index is `WorkerIndices[item][k]`. `WriteSpammerProbabilitiesToCsv` needs the annotations alongside the posterior for exactly this reason.
 - **`GetNumCategories()` returns the category *count*** (`max(label) + 1`), not the max label value. `Program.cs` passes it to the model constructor unchanged — do not add 1.
 - **Two validation passes with different severity.** `CheckWorkerCoverage()` only *warns* (messages surface via `GetValidationMessages()`) when an item has fewer than 3 annotators; inference still runs. `ValidateLabelRange()` *throws* when the observed labels have a gap (e.g. `{0, 2}`), because a phantom category would silently skew inference.
-- **Reproducibility.** Runs are already deterministic across fresh processes, because Infer.NET's `Rand` starts from a fixed default seed. `--seed` changes *which* fixed point inference lands on, and it only has a visible effect on data with more than one mode: `MACE/sample_data.txt` converges to a unique fixed point, so every seed gives identical output there and that file cannot be used to test the flag. A dataset of evenly split, perfectly disagreeing annotators does show the difference.
+- **Reproducibility.** Runs are already deterministic across fresh processes, because Infer.NET's `Rand` starts from a fixed default seed. `--seed` perturbs the symmetry-breaking initialisation, and it only has a visible effect where the data does not determine the answer on its own: `MACE/sample_data.txt` converges to a unique fixed point, so every seed gives identical output there and that file cannot be used to test the flag. `TestSupport.PerfectlyTiedCorpus` can.
+- **Initialisation must be an observed value, not a literal.** `MACEBase` passes it through the `TInit` variable. Handing a literal distribution to `InitialiseTo` compiles the values into the generated algorithm as constants, and the cached algorithm then keeps the *first* run's initialisation — so the seed works from the CLI (one run per process) and silently stops working when inference is called repeatedly in one process, which is exactly the incremental-learning path. `Seed_AffectsPosterior_WithinASingleProcess` guards this.
 - **The engine is EP, and that is load-bearing.** `MACEBase.CreateModel()` constructs `new InferenceEngine(new ExpectationPropagation())` explicitly. Switching to VMP throws "The model has zero probability": the non-spammer branch assigns `_observedLabels = _trueLabels` deterministically, so under VMP each annotator contributes a point mass at its own label and any disagreement multiplies to zero. Changing engines means reformulating the observation model as a soft confusion matrix.

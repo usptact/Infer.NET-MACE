@@ -24,6 +24,10 @@ namespace MACE
         // Data-specific model variables
         protected VariableArray<int> _trueLabels; // T: true labels for each item
 
+        // Symmetry-breaking initialisation for T, supplied as an observed value rather than
+        // baked into the compiled algorithm. See InitializeLabels.
+        protected Variable<IDistribution<int[]>> _trueLabelsInit;
+
         // Prior distributions for shared random variables
         protected VariableArray<Beta> _thetaPriors; // Priors for worker spammer probabilities
         protected VariableArray<Dirichlet> _phiPriors; // Priors for worker label preferences when spamming
@@ -49,6 +53,9 @@ namespace MACE
             _workerRange = new Microsoft.ML.Probabilistic.Models.Range(_numWorkers).Named("worker");
 
             _trueLabels = Variable.Array<int>(_itemRange).Named("T");
+
+            _trueLabelsInit = Variable.New<IDistribution<int[]>>().Named("TInit");
+            _trueLabels.InitialiseTo(_trueLabelsInit);
 
             _thetaPriors = Variable.Array<Beta>(_workerRange).Named("thetaPrior");
             _phiPriors = Variable.Array<Dirichlet>(_workerRange).Named("phiPrior");
@@ -104,6 +111,13 @@ namespace MACE
         /// Initializes the true labels with random assignments to break symmetry.
         /// Must be called before each inference run to avoid getting stuck in a symmetric fixed point.
         /// </summary>
+        /// <remarks>
+        /// The initialisation is passed through the observed variable <c>TInit</c> rather than
+        /// handed to <c>InitialiseTo</c> as a literal distribution. A literal is compiled into the
+        /// generated algorithm as a constant, so the cached algorithm keeps the first run's values
+        /// and every later run in the same process silently reuses them -- which made the seed look
+        /// effective from the command line (one run per process) while doing nothing in a loop.
+        /// </remarks>
         /// <param name="numItems">Number of items in the dataset.</param>
         /// <param name="numCategories">Number of possible label categories.</param>
         protected void InitializeLabels(int numItems, int numCategories)
@@ -127,7 +141,7 @@ namespace MACE
                 initialLabels[item] = Discrete.PointMass(randomLabel, numCategories);
             }
             
-            _trueLabels.InitialiseTo(Distribution<int>.Array(initialLabels));
+            _trueLabelsInit.ObservedValue = Distribution<int>.Array(initialLabels);
         }
     }
 }
