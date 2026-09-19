@@ -47,7 +47,8 @@ This is a single-project .NET 10.0 console application (`MACE/MACE.csproj`) impl
 
 ### Important nuances
 
-- **Items with no annotations are still inferred.** Their posterior is the prior, so the label the CSV reports for them is an argmax over a uniform distribution, not a conclusion. `CheckWorkerCoverage` warns about them separately from thin coverage. The same caveat applies to any exactly tied posterior.
+- **Items and workers with no annotations are still inferred.** Their posteriors are the priors, so the label reported for such an item is an argmax over a uniform distribution and the competence reported for such a worker is whatever the prior said — neither is a measurement. `CheckWorkerCoverage` warns about both, separately from thin item coverage. The same caveat applies to any exactly tied posterior.
+- **`CsvReader.Read()` may be called once per instance.** The stream is consumed, so a second call throws rather than reporting an empty file and doubling the item count.
 - **Carrying priors forward is only valid onto new annotations.** Re-running the same data against its own posterior counts that evidence twice and reports false confidence. `ModelPriorsIo` cannot detect this; the docs warn instead.
 - **`SDist` is indexed by annotation slot, not worker.** `SDist[item][k]` is parallel to `annotations.WorkerIndices[item][k]`; the actual worker index is `WorkerIndices[item][k]`. `WriteSpammerProbabilitiesToCsv` needs the annotations alongside the posterior for exactly this reason.
 - **`GetNumCategories()` returns the category *count*** (`max(label) + 1`), not the max label value. `Program.cs` passes it to the model constructor unchanged — do not add 1.

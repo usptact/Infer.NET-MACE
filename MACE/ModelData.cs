@@ -5,12 +5,13 @@ namespace MACE
     /// <summary>
     /// Prior distributions for worker parameters, passed into inference.
     /// A <see cref="ModelPosterior"/> can be used directly as priors for a subsequent inference
-    /// run to support incremental/online learning.
+    /// run to support incremental/online learning, and <see cref="ModelPriorsIo"/> persists them
+    /// between processes.
     /// </summary>
+    /// <param name="ThetaDist">Beta prior distributions for each worker's spammer probability (theta).</param>
+    /// <param name="PhiDist">Dirichlet prior distributions for each worker's label preferences when spamming (phi).</param>
     public record ModelPriors(
-        /// <summary>Beta prior distributions for each worker's spammer probability (theta).</summary>
         Beta[] ThetaDist,
-        /// <summary>Dirichlet prior distributions for each worker's label preferences when spamming (phi).</summary>
         Dirichlet[] PhiDist
     );
 
@@ -18,14 +19,18 @@ namespace MACE
     /// Posterior distributions returned by inference, containing both the worker parameter
     /// posteriors and the inferred item-level distributions.
     /// </summary>
+    /// <param name="ThetaDist">Posterior Beta distributions for each worker's spammer probability (theta).</param>
+    /// <param name="PhiDist">Posterior Dirichlet distributions for each worker's label preferences when spamming (phi).</param>
+    /// <param name="TDist">Posterior Discrete distributions over the true label for each item (T).</param>
+    /// <param name="SDist">
+    /// Posterior Bernoulli distributions for whether a worker was spamming on an item.
+    /// Indexed by annotation slot, not by worker: <c>SDist[item][k]</c> corresponds to
+    /// <c>SparseAnnotations.WorkerIndices[item][k]</c>.
+    /// </param>
     public record ModelPosterior(
-        /// <summary>Posterior Beta distributions for each worker's spammer probability (theta).</summary>
         Beta[] ThetaDist,
-        /// <summary>Posterior Dirichlet distributions for each worker's label preferences when spamming (phi).</summary>
         Dirichlet[] PhiDist,
-        /// <summary>Posterior Discrete distributions over the true label for each item (T).</summary>
         Discrete[] TDist,
-        /// <summary>Posterior Bernoulli distributions for whether each worker is spamming on each item (S[item][worker]).</summary>
         Bernoulli[][] SDist
     ) : ModelPriors(ThetaDist, PhiDist);
 }

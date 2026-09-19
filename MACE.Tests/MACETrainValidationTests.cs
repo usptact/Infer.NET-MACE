@@ -38,6 +38,71 @@ namespace MACE.Tests
         }
 
         [Fact]
+        public void InferModelData_WorkerIndexOutOfRange_Throws()
+        {
+            var trainer = new MACETrain(3, 1, 2);
+            var annotations = new SparseAnnotations(
+                new[] { new[] { 0, 7 } },
+                new[] { new[] { 0, 1 } });
+
+            var ex = Assert.Throws<ArgumentException>(
+                () => trainer.InferModelData(annotations, TestSupport.UniformPriors(3, 2)));
+            Assert.Contains("names worker 7", ex.Message);
+        }
+
+        [Fact]
+        public void InferModelData_LabelOutOfRange_Throws()
+        {
+            var trainer = new MACETrain(3, 1, 2);
+            var annotations = new SparseAnnotations(
+                new[] { new[] { 0, 1 } },
+                new[] { new[] { 0, 5 } });
+
+            var ex = Assert.Throws<ArgumentException>(
+                () => trainer.InferModelData(annotations, TestSupport.UniformPriors(3, 2)));
+            Assert.Contains("has label 5", ex.Message);
+        }
+
+        [Fact]
+        public void InferModelData_NonParallelWorkerAndLabelArrays_Throws()
+        {
+            var trainer = new MACETrain(3, 1, 2);
+            var annotations = new SparseAnnotations(
+                new[] { new[] { 0, 1 } },
+                new[] { new[] { 0 } });
+
+            var ex = Assert.Throws<ArgumentException>(
+                () => trainer.InferModelData(annotations, TestSupport.UniformPriors(3, 2)));
+            Assert.Contains("must be parallel", ex.Message);
+        }
+
+        [Fact]
+        public void InferModelData_PriorsWithWrongWorkerCount_Throws()
+        {
+            var trainer = new MACETrain(3, 1, 2);
+            var annotations = new SparseAnnotations(
+                new[] { new[] { 0, 1 } },
+                new[] { new[] { 0, 1 } });
+
+            var ex = Assert.Throws<ArgumentException>(
+                () => trainer.InferModelData(annotations, TestSupport.UniformPriors(5, 2)));
+            Assert.Contains("ThetaDist has 5 workers", ex.Message);
+        }
+
+        [Fact]
+        public void InferModelData_PriorsWithWrongCategoryCount_Throws()
+        {
+            var trainer = new MACETrain(3, 1, 2);
+            var annotations = new SparseAnnotations(
+                new[] { new[] { 0, 1 } },
+                new[] { new[] { 0, 1 } });
+
+            var ex = Assert.Throws<ArgumentException>(
+                () => trainer.InferModelData(annotations, TestSupport.UniformPriors(3, 4)));
+            Assert.Contains("categories", ex.Message);
+        }
+
+        [Fact]
         public void InferModelData_ItemCountMismatch_Throws()
         {
             var trainer = new MACETrain(3, 5, 2);

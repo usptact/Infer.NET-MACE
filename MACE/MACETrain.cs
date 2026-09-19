@@ -70,6 +70,91 @@ namespace MACE
         }
 
         /// <summary>
+        /// Checks the annotation data against the dimensions this model was built for.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="CsvReader"/> already guarantees all of this, but the model is public API and a
+        /// caller building <see cref="SparseAnnotations"/> by hand gets a clear message here instead
+        /// of an index-out-of-range thrown from inside the generated inference code.
+        /// </remarks>
+        private void ValidateAnnotations(SparseAnnotations annotations)
+        {
+            int numItems = _numItems.ObservedValue;
+            int numWorkers = _numWorkers.ObservedValue;
+            int numCategories = _numCategories.ObservedValue;
+
+            if (annotations.WorkerIndices.Length != numItems)
+                throw new ArgumentException(
+                    $"Annotations have {annotations.WorkerIndices.Length} items but model expects {numItems}.",
+                    nameof(annotations));
+
+            if (annotations.Labels.Length != numItems)
+                throw new ArgumentException(
+                    $"Annotation labels have {annotations.Labels.Length} items but model expects {numItems}.",
+                    nameof(annotations));
+
+            for (int item = 0; item < numItems; item++)
+            {
+                var workers = annotations.WorkerIndices[item];
+                var labels = annotations.Labels[item];
+
+                if (workers == null || labels == null)
+                    throw new ArgumentException(
+                        $"Item {item} has a null worker or label array.", nameof(annotations));
+
+                if (workers.Length != labels.Length)
+                    throw new ArgumentException(
+                        $"Item {item} has {workers.Length} worker indices but {labels.Length} labels; "
+                        + "the two arrays must be parallel.",
+                        nameof(annotations));
+
+                for (int k = 0; k < workers.Length; k++)
+                {
+                    if (workers[k] < 0 || workers[k] >= numWorkers)
+                        throw new ArgumentException(
+                            $"Item {item} annotation {k} names worker {workers[k]}, outside [0, {numWorkers - 1}].",
+                            nameof(annotations));
+
+                    if (labels[k] < 0 || labels[k] >= numCategories)
+                        throw new ArgumentException(
+                            $"Item {item} annotation {k} has label {labels[k]}, outside [0, {numCategories - 1}].",
+                            nameof(annotations));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks that the priors describe exactly the workers and categories this model was built for.
+        /// </summary>
+        private void ValidatePriors(ModelPriors priors)
+        {
+            int numWorkers = _numWorkers.ObservedValue;
+            int numCategories = _numCategories.ObservedValue;
+
+            if (priors.ThetaDist == null || priors.PhiDist == null)
+                throw new ArgumentException("Priors must supply both ThetaDist and PhiDist.", nameof(priors));
+
+            if (priors.ThetaDist.Length != numWorkers)
+                throw new ArgumentException(
+                    $"ThetaDist has {priors.ThetaDist.Length} workers but model expects {numWorkers}.",
+                    nameof(priors));
+
+            if (priors.PhiDist.Length != numWorkers)
+                throw new ArgumentException(
+                    $"PhiDist has {priors.PhiDist.Length} workers but model expects {numWorkers}.",
+                    nameof(priors));
+
+            for (int worker = 0; worker < numWorkers; worker++)
+            {
+                if (priors.PhiDist[worker].Dimension != numCategories)
+                    throw new ArgumentException(
+                        $"PhiDist for worker {worker} has {priors.PhiDist[worker].Dimension} categories "
+                        + $"but model expects {numCategories}.",
+                        nameof(priors));
+            }
+        }
+
+        /// <summary>
         /// Creates the complete MACE probabilistic model using a sparse jagged representation.
         /// The inner loop runs only over observed (item, worker) pairs — no sentinel values needed.
         /// </summary>
@@ -113,7 +198,11 @@ namespace MACE
         /// <param name="priors">Prior distributions for worker parameters (theta and phi).</param>
         /// <returns>Posterior distributions for all model parameters.</returns>
         /// <exception cref="ArgumentNullException">Thrown when annotations or priors is null.</exception>
-        /// <exception cref="ArgumentException">Thrown when annotation dimensions don't match the model.</exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown when the annotations or priors do not match the dimensions this model was built for:
+        /// wrong item count, non-parallel worker/label arrays, a worker index or label outside its
+        /// valid range, or priors describing a different number of workers or categories.
+        /// </exception>
         public ModelPosterior InferModelData(SparseAnnotations annotations, ModelPriors priors)
         {
             if (annotations == null)
@@ -121,10 +210,8 @@ namespace MACE
             if (priors == null)
                 throw new ArgumentNullException(nameof(priors));
 
-            if (annotations.WorkerIndices.Length != _numItems.ObservedValue)
-                throw new ArgumentException(
-                    $"Annotations have {annotations.WorkerIndices.Length} items but model expects {_numItems.ObservedValue}.",
-                    nameof(annotations));
+            ValidateAnnotations(annotations);
+            ValidatePriors(priors);
 
             if (_seed.HasValue)
                 Rand.Restart(_seed.Value);

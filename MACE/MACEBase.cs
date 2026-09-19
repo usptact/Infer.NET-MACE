@@ -16,28 +16,40 @@ namespace MACE
         /// </summary>
         protected InferenceEngine InferenceEngine { get; set; } = null!;
 
-        // Model dimensions
+        /// <summary>Number of workers (columns) in the dataset.</summary>
         protected Variable<int> _numWorkers;
-        protected Variable<int> _numItems;
-        protected Variable<int> _numCategories;
-        
-        // Data-specific model variables
-        protected VariableArray<int> _trueLabels; // T: true labels for each item
 
-        // Symmetry-breaking initialisation for T, supplied as an observed value rather than
-        // baked into the compiled algorithm. See InitializeLabels.
+        /// <summary>Number of items (rows) in the dataset.</summary>
+        protected Variable<int> _numItems;
+
+        /// <summary>Number of label categories.</summary>
+        protected Variable<int> _numCategories;
+
+        /// <summary>T: the true label of each item, the main quantity being inferred.</summary>
+        protected VariableArray<int> _trueLabels;
+
+        /// <summary>
+        /// Symmetry-breaking initialisation for <see cref="_trueLabels"/>, supplied as an observed
+        /// value rather than baked into the compiled algorithm. See <see cref="InitializeLabels"/>.
+        /// </summary>
         protected Variable<IDistribution<int[]>> _trueLabelsInit;
 
-        // Prior distributions for shared random variables
-        protected VariableArray<Beta> _thetaPriors; // Priors for worker spammer probabilities
-        protected VariableArray<Dirichlet> _phiPriors; // Priors for worker label preferences when spamming
+        /// <summary>Priors for each worker's spammer probability (theta).</summary>
+        protected VariableArray<Beta> _thetaPriors;
 
-        // Shared random variables
-        protected VariableArray<double> _theta; // Worker spammer probabilities
-        protected VariableArray<Vector> _phi; // Worker label preferences when spamming
+        /// <summary>Priors for each worker's label preferences when spamming (phi).</summary>
+        protected VariableArray<Dirichlet> _phiPriors;
 
-        // Ranges for indexing
+        /// <summary>Theta: each worker's probability of spamming on any given item.</summary>
+        protected VariableArray<double> _theta;
+
+        /// <summary>Phi: the label distribution a worker draws from when spamming.</summary>
+        protected VariableArray<Vector> _phi;
+
+        /// <summary>Range over items, used as the outer index of the annotation arrays.</summary>
         protected Microsoft.ML.Probabilistic.Models.Range _itemRange;
+
+        /// <summary>Range over workers, used to index the per-worker parameters.</summary>
         protected Microsoft.ML.Probabilistic.Models.Range _workerRange;
 
         /// <summary>

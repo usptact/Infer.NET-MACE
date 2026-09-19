@@ -190,6 +190,38 @@ namespace MACE.Tests
             Assert.Contains(messages, m => m.Contains("fewer than 3 workers"));
         }
 
+        /// <summary>
+        /// A worker who annotated nothing keeps the prior, so their competence row is not a
+        /// measurement. Same defect class as an item nobody annotated.
+        /// </summary>
+        [Fact]
+        public void Read_WorkerWithNoAnnotations_Warns()
+        {
+            using var csv = new TempCsv("w1,w2,w3,w4", "0,1,0,", "1,1,0,", "0,0,1,");
+            using var reader = new CsvReader(csv.Path);
+            reader.Read();
+
+            var messages = reader.GetValidationMessages();
+            Assert.Contains(messages, m => m.Contains("workers annotated nothing"));
+            Assert.Contains(messages, m => m.Contains("Worker 4"));
+        }
+
+        /// <summary>
+        /// The stream is consumed by the first pass, so a second call used to fail as though the
+        /// file were empty while leaving the item count doubled.
+        /// </summary>
+        [Fact]
+        public void Read_CalledTwice_ThrowsWithAClearMessage()
+        {
+            using var csv = new TempCsv("w1,w2,w3", "0,1,0", "1,1,0");
+            using var reader = new CsvReader(csv.Path);
+            reader.Read();
+
+            var ex = Assert.Throws<InvalidOperationException>(() => reader.Read());
+            Assert.Contains("already been called", ex.Message);
+            Assert.Equal(2, reader.GetNumItems());
+        }
+
         [Fact]
         public void Read_FullyCoveredData_ProducesNoWarnings()
         {

@@ -3,12 +3,16 @@
     /// <summary>
     /// Sparse representation of crowdsourcing annotations.
     /// For each item, only the workers who actually annotated it are stored.
-    /// WorkerIndices[item][k] and Labels[item][k] are parallel arrays.
     /// </summary>
+    /// <param name="WorkerIndices">
+    /// <c>WorkerIndices[item][k]</c> — index of the worker who gave the k-th annotation for this item.
+    /// </param>
+    /// <param name="Labels">
+    /// <c>Labels[item][k]</c> — label given by <c>WorkerIndices[item][k]</c>. Parallel to
+    /// <paramref name="WorkerIndices"/>.
+    /// </param>
     public record SparseAnnotations(
-        /// <summary>WorkerIndices[item][k] — index of the worker who gave the k-th annotation for this item.</summary>
         int[][] WorkerIndices,
-        /// <summary>Labels[item][k] — label given by WorkerIndices[item][k].</summary>
         int[][] Labels
     );
 
@@ -29,6 +33,7 @@
         private int _numItems;
         private int _numCategories;
         private bool _disposed = false;
+        private bool _hasRead = false;
         private readonly List<string> _validationMessages = new();
 
         /// <summary>
@@ -66,13 +71,26 @@
         /// <summary>
         /// Reads and parses the CSV file, populating internal data structures.
         /// </summary>
-        /// <exception cref="InvalidOperationException">Thrown when the file format is invalid or reading fails.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the file format is invalid, when reading fails, or when <see cref="Read"/> has
+        /// already been called on this instance.
+        /// </exception>
         public void Read()
         {
             if (_disposed)
             {
                 throw new ObjectDisposedException(nameof(CsvReader));
             }
+
+            // The underlying stream is consumed by the first pass, so a second call would otherwise
+            // fail as though the file were empty and leave the item count doubled.
+            if (_hasRead)
+            {
+                throw new InvalidOperationException(
+                    "Read() has already been called on this CsvReader. Create a new instance to read the file again.");
+            }
+
+            _hasRead = true;
 
             try
             {
@@ -226,6 +244,9 @@
         /// still inferred, but nothing in the data constrains them: their posterior is the prior, and
         /// the label the output CSV reports for them is an artefact of taking an argmax over a
         /// uniform distribution rather than a conclusion drawn from any annotation.
+        ///
+        /// Workers who annotated nothing are reported for the same reason: their competence is
+        /// whatever the prior said, which must not be read as a measurement.
         /// </remarks>
         private void CheckWorkerCoverage()
         {
@@ -277,6 +298,32 @@
                 foreach (int item in itemsWithInsufficientWorkers)
                 {
                     _validationMessages.Add($"  - Item {item}");
+                }
+            }
+
+            var workersWithNoAnnotations = new List<int>();
+            for (int worker = 0; worker < _numWorkers; worker++)
+            {
+                bool annotated = false;
+                for (int item = 0; item < _numItems && !annotated; item++)
+                {
+                    annotated = _dataList[item][worker] != -1;
+                }
+
+                if (!annotated)
+                {
+                    workersWithNoAnnotations.Add(worker + 1);
+                }
+            }
+
+            if (workersWithNoAnnotations.Count > 0)
+            {
+                _validationMessages.Add(
+                    $"WARNING: {workersWithNoAnnotations.Count} workers annotated nothing. Their competence "
+                    + "stays at the prior and carries no information:");
+                foreach (int worker in workersWithNoAnnotations)
+                {
+                    _validationMessages.Add($"  - Worker {worker}");
                 }
             }
         }

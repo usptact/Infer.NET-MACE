@@ -180,8 +180,11 @@ MACE enforces the following data quality requirements:
 ### Validation Process
 
 During data loading, MACE automatically:
-- **Checks worker coverage**: Reports items with fewer than 3 workers as warnings
+- **Checks item coverage**: Reports items annotated by fewer than 3 workers, and separately reports items with no annotations at all
+- **Checks worker coverage**: Reports workers who annotated nothing
 - **Provides summary**: Shows detailed validation messages in the console output
+
+Coverage problems are warnings, not errors. Items and workers with no annotations still take part in inference, but nothing in the data constrains them: their posteriors are the priors, so the label reported for such an item and the competence reported for such a worker are not measurements. Contiguity of the label range is the one condition that is enforced as an error.
 
 ### Example
 
