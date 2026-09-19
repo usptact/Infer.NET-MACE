@@ -2,6 +2,7 @@
 using Microsoft.ML.Probabilistic.Math;
 using Microsoft.ML.Probabilistic.Models;
 using Microsoft.ML.Probabilistic.Models.Attributes;
+using MACE.Online;
 
 namespace MACE
 {
@@ -67,6 +68,122 @@ namespace MACE
 
             CreateModel();
             InferenceEngine.NumberOfIterations = iterations;
+        }
+
+        /// <summary>The value marking an absent annotation in the flat array taken by <see cref="InferOnline"/>.</summary>
+        public const int MissingAnnotation = -1;
+
+        /// <summary>
+        /// Builds a model sized for inferring one item at a time.
+        /// </summary>
+        /// <remarks>
+        /// A factory rather than a constructor overload: <c>MACETrain(3, 2, 2)</c> would otherwise be
+        /// ambiguous between (workers, items, categories) and (workers, categories, iterations).
+        /// </remarks>
+        /// <param name="numWorkers">Number of workers the model knows about.</param>
+        /// <param name="numCategories">Number of label categories.</param>
+        /// <param name="iterations">Number of EP inference iterations (default: 50).</param>
+        /// <param name="seed">Optional RNG seed for label initialisation.</param>
+        public static MACETrain ForOnlineInference(
+            int numWorkers,
+            int numCategories,
+            int iterations = 50,
+            int? seed = null)
+            => new MACETrain(numWorkers, numItems: 1, numCategories, iterations, seed);
+
+        /// <summary>
+        /// Infers the label of a single item from one annotation per worker.
+        /// </summary>
+        /// <remarks>
+        /// Intended for serving: build the model once, then call this per request. The compiled
+        /// algorithm is reused across calls because the annotations reach it as observed values
+        /// rather than as part of its structure, so only the first call pays compilation.
+        ///
+        /// Worker parameters are not re-estimated here. One item carries far too little evidence to
+        /// move them, and doing so would let a single annotation rewrite a worker's whole history.
+        /// Move them deliberately instead, from resolved items, through
+        /// <see cref="MACE.Online.PriorUpdateService"/>.
+        ///
+        /// An item nobody annotated is allowed and returns the prior unchanged; callers who need
+        /// evidence before acting should check <see cref="OnlineInferenceResult.ContributingWorkers"/>.
+        /// </remarks>
+        /// <param name="annotations">
+        /// One entry per worker, in worker-index order. <see cref="MissingAnnotation"/> marks a worker
+        /// who did not annotate this item.
+        /// </param>
+        /// <param name="priors">Current worker parameters.</param>
+        /// <returns>The item's label posterior and the spammer posteriors of the workers who annotated it.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when annotations or priors is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when the array length or a label is out of range.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when this model was not built for a single item.</exception>
+        public OnlineInferenceResult InferOnline(int[] annotations, ModelPriors priors)
+        {
+            ArgumentNullException.ThrowIfNull(annotations);
+            ArgumentNullException.ThrowIfNull(priors);
+
+            if (_numItems.ObservedValue != 1)
+            {
+                throw new InvalidOperationException(
+                    $"InferOnline needs a single-item model but this one holds {_numItems.ObservedValue} items. "
+                    + "Build it with MACETrain.ForOnlineInference.");
+            }
+
+            int numWorkers = _numWorkers.ObservedValue;
+            if (annotations.Length != numWorkers)
+            {
+                throw new ArgumentException(
+                    $"Expected one entry per worker ({numWorkers}) but got {annotations.Length}.",
+                    nameof(annotations));
+            }
+
+            var contributors = new List<int>();
+            var labels = new List<int>();
+            for (int worker = 0; worker < numWorkers; worker++)
+            {
+                if (annotations[worker] != MissingAnnotation)
+                {
+                    contributors.Add(worker);
+                    labels.Add(annotations[worker]);
+                }
+            }
+
+            var workerIndices = contributors.ToArray();
+            var sparse = new SparseAnnotations(
+                new[] { workerIndices },
+                new[] { labels.ToArray() });
+
+            // InferModelData validates label ranges and prior dimensions.
+            var posterior = InferModelData(sparse, priors);
+
+            var labelDist = posterior.TDist[0];
+            var probs = labelDist.GetProbs();
+
+            int best = 0;
+            for (int category = 1; category < probs.Count; category++)
+            {
+                if (probs[category] > probs[best])
+                {
+                    best = category;
+                }
+            }
+
+            double entropy = 0.0;
+            for (int category = 0; category < probs.Count; category++)
+            {
+                double p = probs[category];
+                if (p > 0.0)
+                {
+                    entropy -= p * Math.Log(p);
+                }
+            }
+
+            return new OnlineInferenceResult(
+                LabelDist: labelDist,
+                Label: best,
+                Confidence: probs[best],
+                Entropy: entropy,
+                ContributingWorkers: workerIndices,
+                SpammerDist: posterior.SDist[0]);
         }
 
         /// <summary>
